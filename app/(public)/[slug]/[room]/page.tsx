@@ -104,25 +104,29 @@ export default async function RoomHomepagePage({ params }: { params: { slug: str
   const roomLabel = formatRoomLabel(room)
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10">
+    <main className="w-full">
       <ContinueSupportBanner businessId={business.id} room={room} />
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+        <div className="relative overflow-visible rounded-2xl border border-slate-200 bg-slate-100">
           {business.cover_image_url ? (
             <img src={business.cover_image_url} alt={`${business.name} cover`} className="h-48 w-full object-cover" />
           ) : (
             <div className="h-48 w-full bg-gradient-to-br from-slate-200 via-slate-100 to-white" />
           )}
-        </div>
-
-        <div className="mt-6 text-center">
           {business.logo_url ? (
-            <img src={business.logo_url} alt={business.name} className="mx-auto h-24 w-24 rounded-full border border-slate-200 object-cover" />
+            <img
+              src={business.logo_url}
+              alt={business.name}
+              className="absolute -bottom-10 left-1/2 h-20 w-20 -translate-x-1/2 rounded-full border-4 border-white bg-white object-cover shadow-sm"
+            />
           ) : (
-            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-3xl font-semibold">
+            <div className="absolute -bottom-10 left-1/2 flex h-20 w-20 -translate-x-1/2 items-center justify-center rounded-full border-4 border-white bg-slate-50 text-2xl font-semibold shadow-sm">
               {business.name.slice(0, 1)}
             </div>
           )}
+        </div>
+
+        <div className="mt-14 text-center">
           <p className="mt-4 text-sm font-medium uppercase tracking-wide text-slate-500">Welcome to</p>
           <h1 className="mt-1 text-3xl font-semibold text-slate-900">{business.name}</h1>
           <p className="mt-2 text-sm font-medium text-slate-600">Room {roomLabel}</p>
