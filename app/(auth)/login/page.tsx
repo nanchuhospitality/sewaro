@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -11,7 +11,7 @@ function friendlyError(message: string) {
   return message
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const supabase = createClient()
   const router = useRouter()
   const params = useSearchParams()
@@ -94,5 +94,22 @@ export default function LoginPage() {
         <p className="mt-5 text-center text-xs text-slate-500">By continuing, you agree to Terms and Privacy.</p>
       </section>
     </main>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto flex max-w-md px-4 py-10">
+          <section className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h1 className="text-2xl font-semibold">Welcome back</h1>
+            <p className="mt-1 text-sm text-slate-600">Loading sign in...</p>
+          </section>
+        </main>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
   )
 }
