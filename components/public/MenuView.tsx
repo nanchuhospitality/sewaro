@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { formatRoomLabel } from '@/lib/utils/rooms'
 import { toTelHref } from '@/lib/utils/phone'
@@ -53,6 +53,7 @@ type Variant = {
 
 type CartLine = {
   key: string
+  source: 'DELIVERS' | 'MART'
   item_id: string
   variant_id: string | null
   item_name: string
@@ -83,6 +84,15 @@ export default function MenuView({
   enableCart = false,
   deliveryChargeNpr = 0,
   whatsappPhone = null,
+  showKitchenClosedPartnerBanner = false,
+  showMartPartnerBanner = false,
+  martMenuHref = null,
+  partnerLabel = 'Nova Delivers',
+  cartSource = 'DELIVERS',
+  sharedPartnerCart = false,
+  deliveryChargeBySource,
+  showVegFilter = true,
+  backHrefOverride = null,
 }: {
   business: Business
   categories: Category[]
@@ -96,6 +106,15 @@ export default function MenuView({
   enableCart?: boolean
   deliveryChargeNpr?: number
   whatsappPhone?: string | null
+  showKitchenClosedPartnerBanner?: boolean
+  showMartPartnerBanner?: boolean
+  martMenuHref?: string | null
+  partnerLabel?: string
+  cartSource?: 'DELIVERS' | 'MART'
+  sharedPartnerCart?: boolean
+  deliveryChargeBySource?: Partial<Record<'DELIVERS' | 'MART', number>>
+  showVegFilter?: boolean
+  backHrefOverride?: string | null
 }) {
   const [search, setSearch] = useState('')
   const [vegOnly, setVegOnly] = useState(false)
@@ -110,6 +129,10 @@ export default function MenuView({
   const [otpSent, setOtpSent] = useState(false)
   const [placingOrder, setPlacingOrder] = useState(false)
   const [creatingHelpTicket, setCreatingHelpTicket] = useState(false)
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
+  const [allCategoriesOpen, setAllCategoriesOpen] = useState(false)
+  const [isSharedCartHydrated, setIsSharedCartHydrated] = useState(!sharedPartnerCart)
+  const categoryTabsRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     fetch('/api/log-view', {
@@ -135,7 +158,7 @@ export default function MenuView({
     const q = search.trim().toLowerCase()
     return items.filter((item) => {
       const itemVariants = variantsByItem.get(item.id) || []
-      if (vegOnly) {
+      if (showVegFilter && vegOnly) {
         if (itemVariants.length > 0) {
           const hasVegVariant = itemVariants.some((variant) => (variant.is_veg ?? item.is_veg) === true)
           if (!hasVegVariant) return false
@@ -148,7 +171,7 @@ export default function MenuView({
       const inVariants = itemVariants.some((variant) => variant.name.toLowerCase().includes(q))
       return inItem || inVariants
     })
-  }, [items, search, vegOnly, variantsByItem])
+  }, [items, search, vegOnly, variantsByItem, showVegFilter])
 
   const itemsByCategory = useMemo(() => {
     const map = new Map<string, Item[]>()
@@ -189,7 +212,104 @@ export default function MenuView({
     return map
   }, [categories])
 
-  const backHref = room ? `/${business.slug}/${room}` : `/${business.slug}`
+  const categoryItemCount = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const category of categories) {
+      map.set(category.id, (itemsByCategory.get(category.id) || []).length)
+    }
+    return map
+  }, [categories, itemsByCategory])
+
+  const orderedNavigableCategories = useMemo(() => {
+    const ordered: Category[] = []
+    const top = categories.filter((category) => !category.parent_id)
+    for (const parent of top) {
+      const parentCount = categoryItemCount.get(parent.id) || 0
+      const children = childCategoriesByParent.get(parent.id) || []
+      const childrenWithItems = children.filter((child) => (categoryItemCount.get(child.id) || 0) > 0)
+      if (parentCount > 0) ordered.push(parent)
+      ordered.push(...childrenWithItems)
+    }
+    return ordered
+  }, [categories, childCategoriesByParent, categoryItemCount])
+
+  const topLevelNavigableCategories = useMemo(() => {
+    const top = categories.filter((category) => !category.parent_id)
+    return top.filter((parent) => {
+      const parentCount = categoryItemCount.get(parent.id) || 0
+      const childHasItems = (childCategoriesByParent.get(parent.id) || []).some((child) => (categoryItemCount.get(child.id) || 0) > 0)
+      return parentCount > 0 || childHasItems
+    })
+  }, [categories, categoryItemCount, childCategoriesByParent])
+
+  const topLevelCategoryCount = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const parent of topLevelNavigableCategories) {
+      const own = categoryItemCount.get(parent.id) || 0
+      const childTotal = (childCategoriesByParent.get(parent.id) || []).reduce((sum, child) => sum + (categoryItemCount.get(child.id) || 0), 0)
+      map.set(parent.id, own + childTotal)
+    }
+    return map
+  }, [topLevelNavigableCategories, childCategoriesByParent, categoryItemCount])
+
+  function scrollToCategory(categoryId: string) {
+    const anchor = categoryAnchors.get(categoryId)
+    if (!anchor) return
+    const target = document.getElementById(anchor)
+    if (!target) return
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setActiveCategoryId(categoryId)
+    setAllCategoriesOpen(false)
+  }
+
+  useEffect(() => {
+    if (!activeCategoryId && orderedNavigableCategories.length > 0) {
+      setActiveCategoryId(orderedNavigableCategories[0].id)
+    }
+  }, [orderedNavigableCategories, activeCategoryId])
+
+  useEffect(() => {
+    if (orderedNavigableCategories.length === 0) return
+    const observers: IntersectionObserver[] = []
+
+    for (const category of orderedNavigableCategories) {
+      const anchor = categoryAnchors.get(category.id)
+      if (!anchor) continue
+      const el = document.getElementById(anchor)
+      if (!el) continue
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries
+            .filter((entry) => entry.isIntersecting)
+            .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
+          if (visible[0]) {
+            setActiveCategoryId(category.id)
+          }
+        },
+        {
+          root: null,
+          rootMargin: '-30% 0px -55% 0px',
+          threshold: [0.1, 0.4, 0.7],
+        }
+      )
+      observer.observe(el)
+      observers.push(observer)
+    }
+
+    return () => {
+      for (const observer of observers) observer.disconnect()
+    }
+  }, [orderedNavigableCategories, categoryAnchors])
+
+  useEffect(() => {
+    if (!activeCategoryId || !categoryTabsRef.current) return
+    const tab = categoryTabsRef.current.querySelector<HTMLButtonElement>(`button[data-cat-tab="${activeCategoryId}"]`)
+    if (!tab) return
+    tab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+  }, [activeCategoryId])
+
+  const backHref = backHrefOverride || (room ? `/${business.slug}/${room}` : `/${business.slug}`)
   const roomLabel = room ? formatRoomLabel(room) : null
   const servicePhone = business.room_service_phone || business.phone
   const roomServiceHours =
@@ -197,9 +317,61 @@ export default function MenuView({
       ? `${business.room_service_open_time.slice(0, 5)} - ${business.room_service_close_time.slice(0, 5)}`
       : null
   const roomServiceStatus = getRoomServiceStatus(business.room_service_open_time, business.room_service_close_time)
+  const lateNightPartnerHref = room ? `/${business.slug}/${room}/partner-menu` : `/${business.slug}/partner-menu`
+  const sharedCartStorageKey = sharedPartnerCart ? `partner_cart:${business.id}:${room || 'general'}` : null
+
+  useEffect(() => {
+    if (!sharedPartnerCart || !sharedCartStorageKey) return
+    try {
+      const raw = localStorage.getItem(sharedCartStorageKey)
+      if (!raw) {
+        setIsSharedCartHydrated(true)
+        return
+      }
+      const parsed = JSON.parse(raw) as { lines?: unknown[]; note?: unknown }
+      const normalized: CartLine[] = Array.isArray(parsed.lines)
+        ? parsed.lines
+            .map((line) => {
+              if (!line || typeof line !== 'object') return null
+              const value = line as Record<string, unknown>
+              const source = value.source === 'MART' ? 'MART' : 'DELIVERS'
+              const key = typeof value.key === 'string' && value.key.length > 0 ? value.key : null
+              const item_id = typeof value.item_id === 'string' ? value.item_id : ''
+              const variant_id = typeof value.variant_id === 'string' ? value.variant_id : null
+              const item_name = typeof value.item_name === 'string' ? value.item_name : ''
+              const variant_name = typeof value.variant_name === 'string' ? value.variant_name : null
+              const unit_price_npr = Number(value.unit_price_npr)
+              const quantity = Number(value.quantity)
+              if (!item_id || !item_name || !Number.isFinite(unit_price_npr) || !Number.isFinite(quantity) || quantity <= 0) return null
+              return {
+                key: key || `${source}:${item_id}::${variant_id || 'base'}`,
+                source,
+                item_id,
+                variant_id,
+                item_name,
+                variant_name,
+                unit_price_npr,
+                quantity,
+              } satisfies CartLine
+            })
+            .filter((line): line is CartLine => Boolean(line))
+        : []
+      setCartLines(normalized)
+      setCartNote(typeof parsed.note === 'string' ? parsed.note : '')
+    } catch {
+      setCartLines([])
+    } finally {
+      setIsSharedCartHydrated(true)
+    }
+  }, [sharedPartnerCart, sharedCartStorageKey])
+
+  useEffect(() => {
+    if (!sharedPartnerCart || !sharedCartStorageKey || !isSharedCartHydrated) return
+    localStorage.setItem(sharedCartStorageKey, JSON.stringify({ lines: cartLines, note: cartNote, savedAt: Date.now() }))
+  }, [sharedPartnerCart, sharedCartStorageKey, isSharedCartHydrated, cartLines, cartNote])
 
   function addToCart(item: Item, variant: Variant | null) {
-    const key = `${item.id}::${variant?.id || 'base'}`
+    const key = `${cartSource}:${item.id}::${variant?.id || 'base'}`
     setCartLines((prev) => {
       const idx = prev.findIndex((line) => line.key === key)
       if (idx >= 0) {
@@ -211,6 +383,7 @@ export default function MenuView({
         ...prev,
         {
           key,
+          source: cartSource,
           item_id: item.id,
           variant_id: variant?.id || null,
           item_name: item.name,
@@ -241,10 +414,13 @@ export default function MenuView({
   const cartSummary = useMemo(() => {
     const count = cartLines.reduce((sum, line) => sum + line.quantity, 0)
     const subtotal = cartLines.reduce((sum, line) => sum + line.quantity * line.unit_price_npr, 0)
-    const delivery = count > 0 ? Math.max(0, deliveryChargeNpr) : 0
+    const sourceCharges = deliveryChargeBySource || { DELIVERS: deliveryChargeNpr, MART: deliveryChargeNpr }
+    const activeSources = new Set(cartLines.map((line) => line.source))
+    const deliveryCandidates = Array.from(activeSources).map((source) => Number(sourceCharges[source] || 0))
+    const delivery = count > 0 ? Math.max(0, deliveryCandidates.length > 0 ? Math.max(...deliveryCandidates) : deliveryChargeNpr) : 0
     const total = subtotal + delivery
     return { count, subtotal, delivery, total }
-  }, [cartLines, deliveryChargeNpr])
+  }, [cartLines, deliveryChargeNpr, deliveryChargeBySource])
 
   const cartQtyByKey = useMemo(() => {
     const map = new Map<string, number>()
@@ -259,9 +435,9 @@ export default function MenuView({
     const digits = whatsappPhone.replace(/[^\d]/g, '')
     if (!digits) return null
     const roomPart = room ? ` and Room ${formatRoomLabel(room)}` : ''
-    const text = `Hello Nova Delivers from ${business.name}${roomPart}`
+    const text = `Hello ${partnerLabel} from ${business.name}${roomPart}`
     return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
-  }, [whatsappPhone, business.name, room])
+  }, [whatsappPhone, business.name, room, partnerLabel])
 
   const orderWhatsappHref = useMemo(() => {
     if (!whatsappPhone || cartSummary.count === 0) return null
@@ -275,7 +451,7 @@ export default function MenuView({
     })
     const noteText = cartNote.trim() ? `\nNote: ${cartNote.trim()}` : ''
     const text =
-      `Hello Nova Delivers from ${business.name}${roomPart}\n\n` +
+      `Hello ${partnerLabel} from ${business.name}${roomPart}\n\n` +
       `Order:\n${lines.join('\n')}\n\n` +
       `Subtotal: ${cartSummary.subtotal}\n` +
       `Delivery Charge: ${cartSummary.delivery}\n` +
@@ -283,7 +459,7 @@ export default function MenuView({
       noteText
 
     return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
-  }, [whatsappPhone, cartSummary, cartLines, cartNote, business.name, room])
+  }, [whatsappPhone, cartSummary, cartLines, cartNote, business.name, room, partnerLabel])
 
   function normalizeNepaliPhone(value: string) {
     const cleaned = value.replace(/[^\d+]/g, '')
@@ -316,6 +492,7 @@ export default function MenuView({
           note: cartNote,
           customer_phone: source === 'OTP' ? otpPhone : null,
           items: cartLines.map((line) => ({
+            source: line.source,
             item_name: line.item_name,
             variant_name: line.variant_name,
             quantity: line.quantity,
@@ -432,56 +609,164 @@ export default function MenuView({
             className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-900"
             placeholder="Search menu"
           />
-          <button
-            type="button"
-            onClick={() => setVegOnly((current) => !current)}
-            className={clsx(
-              'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-3 py-2 text-sm',
-              vegOnly
-                ? 'border-emerald-600 bg-emerald-50 font-semibold text-emerald-800'
-                : 'border-slate-300 bg-white font-medium text-slate-700'
-            )}
-            aria-pressed={vegOnly}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-flex h-3.5 w-3.5 items-center justify-center border border-emerald-600">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+          {showVegFilter ? (
+            <button
+              type="button"
+              onClick={() => setVegOnly((current) => !current)}
+              className={clsx(
+                'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-3 py-2 text-sm',
+                vegOnly
+                  ? 'border-emerald-600 bg-emerald-50 font-semibold text-emerald-800'
+                  : 'border-slate-300 bg-white font-medium text-slate-700'
+              )}
+              aria-pressed={vegOnly}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-flex h-3.5 w-3.5 items-center justify-center border border-emerald-600">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                </span>
+                <span>Veg</span>
               </span>
-              <span>Veg</span>
-            </span>
-            {vegOnly && (
-              <span
-                role="button"
-                aria-label="Clear veg filter"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setVegOnly(false)
-                }}
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-xs leading-none text-emerald-800 hover:bg-emerald-100"
-              >
-                ✕
-              </span>
-            )}
-          </button>
+              {vegOnly && (
+                <span
+                  role="button"
+                  aria-label="Clear veg filter"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setVegOnly(false)
+                  }}
+                  className="inline-flex h-4 w-4 items-center justify-center rounded-full text-xs leading-none text-emerald-800 hover:bg-emerald-100"
+                >
+                  ✕
+                </span>
+              )}
+            </button>
+          ) : null}
         </div>
-        {vegOnly && <p className="mt-2 text-xs font-medium text-emerald-700">Showing veg items only</p>}
+        {showVegFilter && vegOnly && <p className="mt-2 text-xs font-medium text-emerald-700">Showing veg items only</p>}
       </section>
 
-      <div className="sticky top-0 z-20 mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm">
-        <div className="flex gap-2">
-          {categories
-            .filter((category) => !category.parent_id)
-            .map((category) => (
-            <a
-              key={category.id}
-              href={`#${categoryAnchors.get(category.id)}`}
-              className="whitespace-nowrap rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700"
-            >
-              {category.name}
-            </a>
-          ))}
+      {showKitchenClosedPartnerBanner && !roomServiceStatus.isOpen ? (
+        <a href={lateNightPartnerHref} className="mt-4 block overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
+          <div className="relative">
+            <img
+              src="https://images.unsplash.com/photo-1526367790999-0150786686a2?auto=format&fit=crop&w=1800&q=80"
+              alt="Food delivery rider and order handoff"
+              className="h-44 w-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-slate-900/60 to-slate-900/20" />
+            <div className="absolute inset-y-0 left-0 flex max-w-[90%] items-center p-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-amber-200">Hotel Kitchen Closed</p>
+                <p className="mt-1 text-lg font-semibold text-white">Order From Late-Night Partner</p>
+                <p className="mt-1 text-xs text-slate-100">Tap to continue with fast food delivery from our partner menu.</p>
+              </div>
+            </div>
+          </div>
+        </a>
+      ) : null}
+
+      {showMartPartnerBanner ? (
+        <a href={martMenuHref || '#'} className="mt-4 block overflow-hidden rounded-2xl border border-cyan-200 bg-white shadow-sm">
+          <div className="relative">
+            <img
+              src="/images/midnight-mart-banner.svg"
+              alt="Midnight convenience mart essentials"
+              className="h-40 w-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-indigo-950/85 via-slate-900/65 to-slate-900/25" />
+            <div className="absolute inset-y-0 left-0 flex w-full items-center p-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-indigo-200">Midnight Mart</p>
+                <p className="mt-1 text-lg font-semibold text-white">Open For Late-Night Essentials</p>
+                <p className="mt-1 text-xs text-slate-100">Pharmacy &amp; Wellness | Alcohol | Midnight Cravings | More</p>
+              </div>
+            </div>
+          </div>
+        </a>
+      ) : null}
+
+      <div className="sticky top-0 z-20 mt-4 rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAllCategoriesOpen(true)}
+            className="shrink-0 rounded-full border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700"
+          >
+            All ({orderedNavigableCategories.length})
+          </button>
+          <div ref={categoryTabsRef} className="no-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto">
+            {topLevelNavigableCategories.map((category) => {
+              const selected = activeCategoryId === category.id
+              return (
+                <button
+                  key={category.id}
+                  type="button"
+                  data-cat-tab={category.id}
+                  onClick={() => scrollToCategory(category.id)}
+                  className={clsx(
+                    'whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition',
+                    selected
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  )}
+                >
+                  {category.name}
+                  <span className={clsx('ml-1 text-xs', selected ? 'text-slate-200' : 'text-slate-500')}>
+                    {topLevelCategoryCount.get(category.id) || 0}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
+
+      {allCategoriesOpen ? (
+        <div className="fixed inset-0 z-40 bg-slate-900/35 p-4" onClick={() => setAllCategoriesOpen(false)}>
+          <div
+            className="mx-auto mt-14 w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-4 shadow-xl md:mt-20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Browse Categories</p>
+                <p className="text-xs text-slate-500">Jump to any menu section</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAllCategoriesOpen(false)}
+                className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+              {orderedNavigableCategories.map((category) => {
+                const isChild = Boolean(category.parent_id)
+                const selected = activeCategoryId === category.id
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => scrollToCategory(category.id)}
+                    className={clsx(
+                      'flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left',
+                      isChild ? 'ml-4 w-[calc(100%-1rem)]' : '',
+                      selected
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    )}
+                  >
+                    <span className={clsx('font-medium', isChild ? 'text-sm' : 'text-sm')}>{category.name}</span>
+                    <span className={clsx('text-xs', selected ? 'text-slate-200' : 'text-slate-500')}>{categoryItemCount.get(category.id) || 0}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-8">
         {categories
@@ -571,16 +856,20 @@ export default function MenuView({
                                     <span className="text-base font-semibold text-slate-900">{variant.price_npr}</span>
                                     {enableCart && item.is_available ? (
                                       (() => {
-                                        const key = `${item.id}::${variant.id}`
+                                        const key = `${cartSource}:${item.id}::${variant.id}`
                                         const qty = cartQtyByKey.get(key) || 0
                                         if (qty === 0) {
                                           return (
                                             <button
                                               type="button"
                                               onClick={() => addToCart(item, variant)}
-                                              className="rounded border border-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700"
+                                              aria-label={`Add ${item.name} ${variant.name}`}
+                                              className="rounded border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700"
                                             >
-                                              Add
+                                              <span aria-hidden="true" className="inline-flex items-center gap-1 leading-none">
+                                                <span className="text-sm">+</span>
+                                                <span>Add</span>
+                                              </span>
                                             </button>
                                           )
                                         }
@@ -618,16 +907,20 @@ export default function MenuView({
                         <p className="text-base font-semibold">{item.price_npr}</p>
                         {enableCart && item.is_available ? (
                           (() => {
-                            const key = `${item.id}::base`
+                            const key = `${cartSource}:${item.id}::base`
                             const qty = cartQtyByKey.get(key) || 0
                             if (qty === 0) {
                               return (
                                 <button
                                   type="button"
                                   onClick={() => addToCart(item, null)}
-                                  className="rounded border border-slate-300 px-2 py-0.5 text-xs font-medium text-slate-700"
+                                  aria-label={`Add ${item.name}`}
+                                  className="rounded border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700"
                                 >
-                                  Add
+                                  <span aria-hidden="true" className="inline-flex items-center gap-1 leading-none">
+                                    <span className="text-sm">+</span>
+                                    <span>Add</span>
+                                  </span>
                                 </button>
                               )
                             }
@@ -727,7 +1020,9 @@ export default function MenuView({
                         <div className="min-w-0 flex-1">
                           <p className="break-words font-medium text-slate-900">{line.item_name}</p>
                           {line.variant_name ? <p className="break-words text-sm text-slate-600">{line.variant_name}</p> : null}
-                          <p className="text-sm font-semibold text-slate-800">{line.unit_price_npr}</p>
+                          <p className="text-sm font-semibold text-slate-800">
+                            {line.quantity} x {line.unit_price_npr} = {line.quantity * line.unit_price_npr}
+                          </p>
                         </div>
                         <div className="flex shrink-0 items-center justify-end gap-2">
                           <button type="button" onClick={() => decrementCartLine(line.key)} className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700">-</button>

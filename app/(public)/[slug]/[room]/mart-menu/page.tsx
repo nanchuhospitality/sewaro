@@ -5,11 +5,11 @@ import { createClient } from '@/lib/supabase/server'
 import { RESERVED_SLUGS, ROOM_REGEX } from '@/lib/utils/constants'
 import { formatRoomLabel } from '@/lib/utils/rooms'
 
-async function getPartnerMenuData(slug: string) {
+async function getMartMenuData(slug: string) {
   const supabase = createClient()
   const withEnable = await supabase
     .from('businesses')
-    .select('id,name,slug,logo_url,address,phone,is_active,enable_nova_delivers_menu,enable_nova_delivers_ordering,nova_delivers_delivery_charge_npr,nova_delivers_support_phone,enable_nova_mart_menu,nova_mart_delivery_charge_npr')
+    .select('id,name,slug,logo_url,address,phone,is_active,enable_nova_mart_menu,enable_nova_mart_ordering,nova_mart_delivery_charge_npr,nova_mart_support_phone,nova_delivers_delivery_charge_npr')
     .eq('slug', slug)
     .eq('is_active', true)
     .maybeSingle()
@@ -19,12 +19,11 @@ async function getPartnerMenuData(slug: string) {
   if (
     !business &&
     (
-      schemaError.includes('enable_nova_delivers_menu') ||
-      schemaError.includes('enable_nova_delivers_ordering') ||
-      schemaError.includes('nova_delivers_delivery_charge_npr') ||
-      schemaError.includes('nova_delivers_support_phone') ||
       schemaError.includes('enable_nova_mart_menu') ||
-      schemaError.includes('nova_mart_delivery_charge_npr')
+      schemaError.includes('enable_nova_mart_ordering') ||
+      schemaError.includes('nova_mart_delivery_charge_npr') ||
+      schemaError.includes('nova_mart_support_phone') ||
+      schemaError.includes('nova_delivers_delivery_charge_npr')
     )
   ) {
     const fallback = await supabase
@@ -34,21 +33,28 @@ async function getPartnerMenuData(slug: string) {
       .eq('is_active', true)
       .maybeSingle()
     business = fallback.data
-      ? { ...fallback.data, enable_nova_delivers_menu: false, enable_nova_delivers_ordering: false, nova_delivers_delivery_charge_npr: 0, nova_delivers_support_phone: null, enable_nova_mart_menu: false, nova_mart_delivery_charge_npr: 0 }
+      ? {
+          ...fallback.data,
+          enable_nova_mart_menu: false,
+          enable_nova_mart_ordering: false,
+          nova_mart_delivery_charge_npr: 0,
+          nova_mart_support_phone: null,
+          nova_delivers_delivery_charge_npr: 0,
+        }
       : null
   }
 
-  if (!business || !business.enable_nova_delivers_menu) return null
+  if (!business || !business.enable_nova_mart_menu) return null
 
   const menu = await supabase
-    .from('nova_delivers_menu')
+    .from('nova_mart_menu')
     .select('categories,items,variants')
     .eq('id', 1)
     .maybeSingle()
 
   const menuSchemaError = menu.error?.message?.toLowerCase() || ''
   const menuData =
-    menu.error && menuSchemaError.includes('nova_delivers_menu')
+    menu.error && menuSchemaError.includes('nova_mart_menu')
       ? { categories: [], items: [], variants: [] }
       : (menu.data ?? { categories: [], items: [], variants: [] })
 
@@ -73,26 +79,26 @@ export async function generateMetadata({ params }: { params: { slug: string; roo
   const room = params.room.toLowerCase()
   if (RESERVED_SLUGS.has(slug) || !ROOM_REGEX.test(room)) return { title: 'Not Found — Sewaro' }
 
-  const data = await getPartnerMenuData(slug)
+  const data = await getMartMenuData(slug)
   if (!data) return { title: 'Not Found — Sewaro' }
 
-  const title = `${data.business.name} Late-Night Delivery Room ${formatRoomLabel(room)} — Sewaro`
+  const title = `${data.business.name} Midnight Mart Room ${formatRoomLabel(room)} — Sewaro`
   return {
     title,
-    description: `${data.business.name} partner delivery menu`,
+    description: `${data.business.name} midnight mart menu`,
     openGraph: {
       title,
-      description: `${data.business.name} partner delivery menu`,
+      description: `${data.business.name} midnight mart menu`,
     },
   }
 }
 
-export default async function RoomPartnerMenuPage({ params }: { params: { slug: string; room: string } }) {
+export default async function RoomMartMenuPage({ params }: { params: { slug: string; room: string } }) {
   const slug = params.slug.toLowerCase()
   const room = params.room.toLowerCase()
   if (RESERVED_SLUGS.has(slug) || !ROOM_REGEX.test(room)) notFound()
 
-  const data = await getPartnerMenuData(slug)
+  const data = await getMartMenuData(slug)
   if (!data) notFound()
 
   return (
@@ -102,26 +108,26 @@ export default async function RoomPartnerMenuPage({ params }: { params: { slug: 
       items={data.items}
       variants={data.variants}
       room={room}
-      menuTitle="Late-Night Delivery Menu"
+      menuTitle="Midnight Mart"
       serviceMessage={
-        data.business.enable_nova_delivers_ordering
+        data.business.enable_nova_mart_ordering
           ? 'Delivered to your room. Paid separately.'
           : 'Delivered to your room. Paid separately. Ordering starts soon.'
       }
       showServicePhone={false}
       showServiceHours={false}
-      enableCart={Boolean(data.business.enable_nova_delivers_ordering)}
-      deliveryChargeNpr={data.business.nova_delivers_delivery_charge_npr || 0}
+      enableCart={Boolean(data.business.enable_nova_mart_ordering)}
+      deliveryChargeNpr={Number(data.business.nova_mart_delivery_charge_npr || 0)}
       deliveryChargeBySource={{
         DELIVERS: Number(data.business.nova_delivers_delivery_charge_npr || 0),
         MART: Number(data.business.nova_mart_delivery_charge_npr || 0),
       }}
-      whatsappPhone={data.business.nova_delivers_support_phone || null}
-      showMartPartnerBanner={Boolean(data.business.enable_nova_mart_menu)}
-      martMenuHref={`/${slug}/${room}/mart-menu`}
-      partnerLabel="Nova Delivers"
-      cartSource="DELIVERS"
+      whatsappPhone={data.business.nova_mart_support_phone || null}
+      partnerLabel="Midnight Mart"
+      cartSource="MART"
       sharedPartnerCart
+      showVegFilter={false}
+      backHrefOverride={`/${slug}/${room}/partner-menu`}
     />
   )
 }

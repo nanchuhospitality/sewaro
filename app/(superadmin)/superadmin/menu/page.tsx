@@ -1,8 +1,9 @@
 'use client'
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import StorageUploader from '@/components/dashboard/StorageUploader'
-import { getNovaDeliversMenu, saveNovaDeliversMenu } from '@/actions/novaMenu'
+import { getNovaDeliversMenu, getNovaMartMenu, saveNovaDeliversMenu, saveNovaMartMenu } from '@/actions/novaMenu'
 
 type Category = {
   id: string
@@ -73,19 +74,43 @@ function parseVeg(value: string | null | undefined, fallback = true) {
 
 function SortableCategoryCard({
   category,
+  isDragging,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  dropIndicatorPosition,
   children,
 }: {
   category: Category
+  isDragging: boolean
+  onDragStart: (id: string) => void
+  onDragEnd: () => void
+  onDragOver: (e: DragEvent<HTMLDivElement>) => void
+  onDrop: (targetId: string) => void
+  dropIndicatorPosition: 'before' | 'after' | null
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div
+      className={`relative rounded-xl border bg-white p-4 shadow-sm ${isDragging ? 'border-slate-400 opacity-70' : 'border-slate-200'}`}
+      onDragOver={onDragOver}
+      onDrop={() => onDrop(category.id)}
+    >
+      {dropIndicatorPosition === 'before' ? <div className="pointer-events-none absolute -top-1 left-3 right-3 h-1 rounded bg-sky-500" /> : null}
+      {dropIndicatorPosition === 'after' ? <div className="pointer-events-none absolute -bottom-1 left-3 right-3 h-1 rounded bg-sky-500" /> : null}
       <div className="mb-3 flex items-center justify-between">
         <p className="font-medium">
           {category.parent_id ? <span className="mr-1 text-slate-400">↳</span> : null}
           {category.name}
         </p>
-        <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs" disabled>
+        <button
+          type="button"
+          draggable
+          onDragStart={() => onDragStart(category.id)}
+          onDragEnd={onDragEnd}
+          className="cursor-grab rounded border border-slate-300 px-2 py-1 text-xs active:cursor-grabbing"
+        >
           Drag
         </button>
       </div>
@@ -98,6 +123,13 @@ function ItemRow({
   item,
   variants,
   categoryId,
+  isVegEnabled,
+  isDraggingItem,
+  onItemDragStart,
+  onItemDragEnd,
+  onItemDragOver,
+  onItemDrop,
+  dropIndicatorPosition,
   onStatus,
   onUpdateItem,
   onDeleteItem,
@@ -108,6 +140,13 @@ function ItemRow({
   item: Item
   variants: Variant[]
   categoryId: string
+  isVegEnabled: boolean
+  isDraggingItem: boolean
+  onItemDragStart: (id: string) => void
+  onItemDragEnd: () => void
+  onItemDragOver: (e: DragEvent<HTMLDivElement>) => void
+  onItemDrop: (targetId: string) => void
+  dropIndicatorPosition: 'before' | 'after' | null
   onStatus: (status: { type: 'error' | 'success'; message: string } | null) => void
   onUpdateItem: (id: string, data: Partial<Item>) => void
   onDeleteItem: (id: string) => void
@@ -119,7 +158,13 @@ function ItemRow({
   const addVariantFormRef = useRef<HTMLFormElement>(null)
 
   return (
-    <div className="rounded-lg border border-slate-200 p-3">
+    <div
+      className={`relative rounded-lg border p-3 ${isDraggingItem ? 'border-slate-400 opacity-70' : 'border-slate-200'}`}
+      onDragOver={onItemDragOver}
+      onDrop={() => onItemDrop(item.id)}
+    >
+      {dropIndicatorPosition === 'before' ? <div className="pointer-events-none absolute -top-1 left-2 right-2 h-1 rounded bg-sky-500" /> : null}
+      {dropIndicatorPosition === 'after' ? <div className="pointer-events-none absolute -bottom-1 left-2 right-2 h-1 rounded bg-sky-500" /> : null}
       <form
         onSubmit={(e) => {
           e.preventDefault()
@@ -137,7 +182,7 @@ function ItemRow({
             description: String(fd.get('description') || '').trim(),
             image_url: imageUrl.trim(),
             is_available: String(fd.get('is_available') || 'true') === 'true',
-            is_veg: String(fd.get('is_veg') || 'true') === 'true',
+            is_veg: isVegEnabled ? String(fd.get('is_veg') || 'true') === 'true' : item.is_veg,
           })
           onStatus({ type: 'success', message: 'Item updated (UI only).' })
         }}
@@ -145,7 +190,13 @@ function ItemRow({
       >
         <div className="flex items-center justify-between gap-2">
           <input name="name" defaultValue={item.name} className="w-full rounded border border-slate-300 px-2 py-1 text-sm" />
-          <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs" disabled>
+          <button
+            type="button"
+            draggable
+            onDragStart={() => onItemDragStart(item.id)}
+            onDragEnd={onItemDragEnd}
+            className="cursor-grab rounded border border-slate-300 px-2 py-1 text-xs active:cursor-grabbing"
+          >
             Drag
           </button>
         </div>
@@ -156,10 +207,12 @@ function ItemRow({
             <option value="false">Sold out</option>
           </select>
         </div>
-        <select name="is_veg" defaultValue={String(item.is_veg)} className="w-full rounded border border-slate-300 px-2 py-1 text-sm">
-          <option value="true">Veg</option>
-          <option value="false">Non-Veg</option>
-        </select>
+        {isVegEnabled ? (
+          <select name="is_veg" defaultValue={String(item.is_veg)} className="w-full rounded border border-slate-300 px-2 py-1 text-sm">
+            <option value="true">Veg</option>
+            <option value="false">Non-Veg</option>
+          </select>
+        ) : null}
         <input
           name="description"
           defaultValue={item.description || ''}
@@ -206,19 +259,21 @@ function ItemRow({
                 onUpdateVariant(variant.id, {
                   name,
                   price_npr: price,
-                  is_veg: String(fd.get('is_veg') || 'true') === 'true',
+                  is_veg: isVegEnabled ? String(fd.get('is_veg') || 'true') === 'true' : variant.is_veg,
                   is_active: String(fd.get('is_active') || 'true') === 'true',
                 })
                 onStatus({ type: 'success', message: 'Variant updated (UI only).' })
               }}
-              className="grid gap-2 rounded border border-slate-200 bg-white p-2 md:grid-cols-5"
+              className={`grid gap-2 rounded border border-slate-200 bg-white p-2 ${isVegEnabled ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}
             >
               <input name="name" defaultValue={variant.name} className="rounded border border-slate-300 px-2 py-1 text-sm" />
               <input name="price_npr" defaultValue={variant.price_npr} type="number" min={0} className="rounded border border-slate-300 px-2 py-1 text-sm" />
-              <select name="is_veg" defaultValue={String(variant.is_veg)} className="rounded border border-slate-300 px-2 py-1 text-sm">
-                <option value="true">Veg</option>
-                <option value="false">Non-Veg</option>
-              </select>
+              {isVegEnabled ? (
+                <select name="is_veg" defaultValue={String(variant.is_veg)} className="rounded border border-slate-300 px-2 py-1 text-sm">
+                  <option value="true">Veg</option>
+                  <option value="false">Non-Veg</option>
+                </select>
+              ) : null}
               <select name="is_active" defaultValue={String(variant.is_active)} className="rounded border border-slate-300 px-2 py-1 text-sm">
                 <option value="true">Active</option>
                 <option value="false">Hidden</option>
@@ -247,7 +302,7 @@ function ItemRow({
             const fd = new FormData(e.currentTarget)
             const name = String(fd.get('name') || '').trim()
             const price = Number(fd.get('price_npr'))
-            const isVeg = String(fd.get('is_veg') || 'true') === 'true'
+            const isVeg = isVegEnabled ? String(fd.get('is_veg') || 'true') === 'true' : item.is_veg
             if (!name) return onStatus({ type: 'error', message: 'Variant name is required.' })
             if (!Number.isInteger(price) || price < 0) return onStatus({ type: 'error', message: 'Variant price must be non-negative integer.' })
 
@@ -255,14 +310,16 @@ function ItemRow({
             addVariantFormRef.current?.reset()
             onStatus({ type: 'success', message: 'Variant created (UI only).' })
           }}
-          className="mt-2 grid gap-2 rounded border border-dashed border-slate-300 p-2 md:grid-cols-4"
+          className={`mt-2 grid gap-2 rounded border border-dashed border-slate-300 p-2 ${isVegEnabled ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}
         >
           <input name="name" required placeholder="Variant name" className="rounded border border-slate-300 px-2 py-1 text-sm" />
           <input name="price_npr" required type="number" min={0} placeholder="Variant price" className="rounded border border-slate-300 px-2 py-1 text-sm" />
-          <select name="is_veg" defaultValue="true" className="rounded border border-slate-300 px-2 py-1 text-sm">
-            <option value="true">Veg</option>
-            <option value="false">Non-Veg</option>
-          </select>
+          {isVegEnabled ? (
+            <select name="is_veg" defaultValue="true" className="rounded border border-slate-300 px-2 py-1 text-sm">
+              <option value="true">Veg</option>
+              <option value="false">Non-Veg</option>
+            </select>
+          ) : null}
           <button className="rounded bg-slate-800 px-3 py-1 text-xs text-white">Add variant</button>
         </form>
       </div>
@@ -271,6 +328,9 @@ function ItemRow({
 }
 
 export default function SuperadminMenuPage() {
+  const searchParams = useSearchParams()
+  const queryProgram = (searchParams.get('program') || 'delivers').toLowerCase()
+  const [program, setProgram] = useState<'DELIVERS' | 'MART'>(queryProgram === 'mart' ? 'MART' : 'DELIVERS')
   const [categories, setCategories] = useState<Category[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [variants, setVariants] = useState<Variant[]>([])
@@ -284,10 +344,24 @@ export default function SuperadminMenuPage() {
   const [itemDesc, setItemDesc] = useState('')
   const [itemImage, setItemImage] = useState('')
   const [itemVeg, setItemVeg] = useState(true)
+  const [dragCategoryId, setDragCategoryId] = useState<string | null>(null)
+  const [dragItemId, setDragItemId] = useState<string | null>(null)
+  const [categoryDropTarget, setCategoryDropTarget] = useState<{ id: string; position: 'before' | 'after' } | null>(null)
+  const [itemDropTarget, setItemDropTarget] = useState<{ id: string; position: 'before' | 'after' } | null>(null)
+  const isVegEnabled = program === 'DELIVERS'
+
+  useEffect(() => {
+    setProgram(queryProgram === 'mart' ? 'MART' : 'DELIVERS')
+  }, [queryProgram])
 
   useEffect(() => {
     let active = true
-    getNovaDeliversMenu()
+    setIsLoading(true)
+    setStatus(null)
+    const loader = program === 'DELIVERS' ? getNovaDeliversMenu : getNovaMartMenu
+    const programLabel = program === 'DELIVERS' ? 'Nova Delivers' : 'Nova Mart'
+
+    loader()
       .then((data) => {
         if (!active) return
         setCategories(data.categories || [])
@@ -301,7 +375,7 @@ export default function SuperadminMenuPage() {
       })
       .catch(() => {
         if (!active) return
-        setStatus({ type: 'error', message: 'Failed to load Nova Delivers menu.' })
+        setStatus({ type: 'error', message: `Failed to load ${programLabel} menu.` })
       })
       .finally(() => {
         if (!active) return
@@ -311,18 +385,20 @@ export default function SuperadminMenuPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [program])
 
   async function onSaveMenu() {
     setStatus(null)
     setIsSaving(true)
-    const result = await saveNovaDeliversMenu({ categories, items, variants })
+    const saver = program === 'DELIVERS' ? saveNovaDeliversMenu : saveNovaMartMenu
+    const programLabel = program === 'DELIVERS' ? 'Nova Delivers' : 'Nova Mart'
+    const result = await saver({ categories, items, variants })
     setIsSaving(false)
     if ('error' in result) {
-      setStatus({ type: 'error', message: result.error || 'Failed to save Nova Delivers menu.' })
+      setStatus({ type: 'error', message: result.error || `Failed to save ${programLabel} menu.` })
       return
     }
-    setStatus({ type: 'success', message: 'Nova Delivers menu saved.' })
+    setStatus({ type: 'success', message: `${programLabel} menu saved.` })
   }
 
   const itemsByCategory = useMemo(() => {
@@ -342,6 +418,24 @@ export default function SuperadminMenuPage() {
     for (const list of grouped.values()) list.sort((a, b) => a.sort_order - b.sort_order)
     return grouped
   }, [variants])
+
+  const categoriesForDisplay = useMemo(() => {
+    const topLevel = categories.filter((c) => !c.parent_id).sort((a, b) => a.sort_order - b.sort_order)
+    const childrenByParent = new Map<string, Category[]>()
+    for (const category of categories) {
+      if (!category.parent_id) continue
+      if (!childrenByParent.has(category.parent_id)) childrenByParent.set(category.parent_id, [])
+      childrenByParent.get(category.parent_id)!.push(category)
+    }
+    for (const list of childrenByParent.values()) list.sort((a, b) => a.sort_order - b.sort_order)
+
+    const ordered: Category[] = []
+    for (const parent of topLevel) {
+      ordered.push(parent)
+      ordered.push(...(childrenByParent.get(parent.id) || []))
+    }
+    return ordered
+  }, [categories])
 
   function updateCategory(id: string, data: Partial<Category>) {
     setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)))
@@ -386,6 +480,64 @@ export default function SuperadminMenuPage() {
 
   function deleteVariant(id: string) {
     setVariants((prev) => prev.filter((v) => v.id !== id))
+  }
+
+  function reorderCategories(dragId: string, targetId: string, position: 'before' | 'after') {
+    if (dragId === targetId) return
+    const drag = categories.find((c) => c.id === dragId)
+    const target = categories.find((c) => c.id === targetId)
+    if (!drag || !target) return
+    if ((drag.parent_id || null) !== (target.parent_id || null)) {
+      setStatus({ type: 'error', message: 'Drag categories within the same level only.' })
+      return
+    }
+
+    setCategories((prev) => {
+      const siblingParentId = drag.parent_id || null
+      const siblings = prev
+        .filter((c) => (c.parent_id || null) === siblingParentId)
+        .sort((a, b) => a.sort_order - b.sort_order)
+      const from = siblings.findIndex((c) => c.id === dragId)
+      const to = siblings.findIndex((c) => c.id === targetId)
+      if (from < 0 || to < 0 || from === to) return prev
+      const nextSiblings = [...siblings]
+      const [moved] = nextSiblings.splice(from, 1)
+      let insertIndex = position === 'before' ? to : to + 1
+      if (from < insertIndex) insertIndex -= 1
+      nextSiblings.splice(insertIndex, 0, moved)
+      const order = new Map(nextSiblings.map((c, idx) => [c.id, idx]))
+      return prev.map((c) => (order.has(c.id) ? { ...c, sort_order: order.get(c.id)! } : c))
+    })
+    setStatus({ type: 'success', message: 'Category order updated (UI only).' })
+  }
+
+  function reorderItems(dragId: string, targetId: string, position: 'before' | 'after') {
+    if (dragId === targetId) return
+    const drag = items.find((i) => i.id === dragId)
+    const target = items.find((i) => i.id === targetId)
+    if (!drag || !target) return
+    if ((drag.category_id || null) !== (target.category_id || null)) {
+      setStatus({ type: 'error', message: 'Drag items within the same category only.' })
+      return
+    }
+
+    setItems((prev) => {
+      const siblingCategoryId = drag.category_id || null
+      const siblings = prev
+        .filter((i) => (i.category_id || null) === siblingCategoryId)
+        .sort((a, b) => a.sort_order - b.sort_order)
+      const from = siblings.findIndex((i) => i.id === dragId)
+      const to = siblings.findIndex((i) => i.id === targetId)
+      if (from < 0 || to < 0 || from === to) return prev
+      const nextSiblings = [...siblings]
+      const [moved] = nextSiblings.splice(from, 1)
+      let insertIndex = position === 'before' ? to : to + 1
+      if (from < insertIndex) insertIndex -= 1
+      nextSiblings.splice(insertIndex, 0, moved)
+      const order = new Map(nextSiblings.map((i, idx) => [i.id, idx]))
+      return prev.map((i) => (order.has(i.id) ? { ...i, sort_order: order.get(i.id)! } : i))
+    })
+    setStatus({ type: 'success', message: 'Item order updated (UI only).' })
   }
 
   async function onImportCsv(e: FormEvent) {
@@ -472,7 +624,7 @@ export default function SuperadminMenuPage() {
           description: idxDesc >= 0 ? String(cols[idxDesc] || '').trim() : '',
           image_url: idxImage >= 0 ? String(cols[idxImage] || '').trim() : '',
           is_available: true,
-          is_veg: parseVeg(idxVeg >= 0 ? String(cols[idxVeg] || '') : '', true),
+          is_veg: isVegEnabled ? parseVeg(idxVeg >= 0 ? String(cols[idxVeg] || '') : '', true) : true,
           sort_order: localItems.length,
         })
         itemKeyToId.set(itemKey, itemId)
@@ -499,7 +651,7 @@ export default function SuperadminMenuPage() {
       }
       if (variantName && Number.isInteger(variantPrice) && variantPrice >= 0) {
         const itemVeg = localItems.find((item) => item.id === itemId)?.is_veg ?? true
-        const variantVeg = parseVeg(idxVariantVeg >= 0 ? String(cols[idxVariantVeg] || '') : '', itemVeg)
+        const variantVeg = isVegEnabled ? parseVeg(idxVariantVeg >= 0 ? String(cols[idxVariantVeg] || '') : '', itemVeg) : true
         localVariants.push({
           id: uid('var'),
           menu_item_id: itemId,
@@ -526,7 +678,9 @@ export default function SuperadminMenuPage() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">Nova Delivers Menu</h1>
+        <div>
+          <h1 className="text-xl font-semibold">{program === 'DELIVERS' ? 'Nova Delivers Menu' : 'Nova Mart Menu'}</h1>
+        </div>
         <button
           type="button"
           onClick={onSaveMenu}
@@ -537,16 +691,24 @@ export default function SuperadminMenuPage() {
         </button>
       </div>
       {isLoading ? (
-        <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">Loading menu...</p>
+        <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+          Loading {program === 'DELIVERS' ? 'Nova Delivers' : 'Nova Mart'} menu...
+        </p>
       ) : null}
       <div className="space-y-6">
         <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <h2 className="text-base font-semibold">Import menu via CSV</h2>
-          <p className="mt-1 text-sm text-slate-600">Required columns: category, name, price_npr. Optional: subcategory, description, image_url, is_veg (Y/N), variant_name, variant_price_npr, variant_is_veg (Y/N).</p>
+          <p className="mt-1 text-sm text-slate-600">
+            Required columns: category, name, price_npr. Optional: subcategory, description, image_url, variant_name, variant_price_npr{isVegEnabled ? ', is_veg (Y/N), variant_is_veg (Y/N)' : ''}.
+          </p>
           <div className="mt-2">
             <a
-              href={`data:text/csv;charset=utf-8,${encodeURIComponent('category,subcategory,name,price_npr,description,image_url,is_veg,variant_name,variant_price_npr,variant_is_veg\nPizza,Classic,Margherita,500,Classic cheese,,Y,Small,500,Y\nPizza,Classic,Margherita,500,Classic cheese,,Y,Large,900,N')}`}
-              download="nova-delivers-menu-sample.csv"
+              href={`data:text/csv;charset=utf-8,${encodeURIComponent(
+                isVegEnabled
+                  ? 'category,subcategory,name,price_npr,description,image_url,is_veg,variant_name,variant_price_npr,variant_is_veg\nPizza,Classic,Margherita,500,Classic cheese,,Y,Small,500,Y\nPizza,Classic,Margherita,500,Classic cheese,,Y,Large,900,N'
+                  : 'category,subcategory,name,price_npr,description,image_url,variant_name,variant_price_npr\nSnacks,Chips,Potato Chips,180,Classic salted chips,,Small,180\nSnacks,Chips,Potato Chips,180,Classic salted chips,,Large,300'
+              )}`}
+              download={program === 'DELIVERS' ? 'nova-delivers-menu-sample.csv' : 'nova-mart-menu-sample.csv'}
               className="text-xs font-medium text-slate-700 underline-offset-2 hover:underline"
             >
               Download sample CSV
@@ -607,8 +769,32 @@ export default function SuperadminMenuPage() {
         {status && <p className={`text-sm ${status.type === 'error' ? 'text-red-600' : 'text-emerald-700'}`}>{status.message}</p>}
 
         <div className="space-y-4">
-          {categories.map((category) => (
-            <SortableCategoryCard key={category.id} category={category}>
+          {categoriesForDisplay.map((category) => (
+            <SortableCategoryCard
+              key={category.id}
+              category={category}
+              isDragging={dragCategoryId === category.id}
+              onDragStart={setDragCategoryId}
+              onDragEnd={() => {
+                setDragCategoryId(null)
+                setCategoryDropTarget(null)
+              }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                if (!dragCategoryId || dragCategoryId === category.id) return
+                const rect = e.currentTarget.getBoundingClientRect()
+                const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+                setCategoryDropTarget({ id: category.id, position })
+              }}
+              onDrop={(targetId) => {
+                if (!dragCategoryId) return
+                const position = categoryDropTarget?.id === targetId ? categoryDropTarget.position : 'after'
+                reorderCategories(dragCategoryId, targetId, position)
+                setDragCategoryId(null)
+                setCategoryDropTarget(null)
+              }}
+              dropIndicatorPosition={categoryDropTarget?.id === category.id ? categoryDropTarget.position : null}
+            >
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
@@ -671,7 +857,7 @@ export default function SuperadminMenuPage() {
                     description: itemDesc.trim(),
                     image_url: itemImage.trim(),
                     is_available: true,
-                    is_veg: itemVeg,
+                    is_veg: isVegEnabled ? itemVeg : true,
                     sort_order: items.length,
                   }
                   setItems((prev) => [...prev, created])
@@ -687,10 +873,12 @@ export default function SuperadminMenuPage() {
                 <input value={itemName} onChange={(e) => setItemName(e.target.value)} required className="rounded border border-slate-300 px-2 py-1 text-sm" placeholder="Item name" />
                 <input value={itemPrice} onChange={(e) => setItemPrice(e.target.value)} type="number" min={0} required className="rounded border border-slate-300 px-2 py-1 text-sm" placeholder="Price" />
                 <input value={itemDesc} onChange={(e) => setItemDesc(e.target.value)} className="rounded border border-slate-300 px-2 py-1 text-sm" placeholder="Description" />
-                <select value={itemVeg ? 'true' : 'false'} onChange={(e) => setItemVeg(e.target.value === 'true')} className="rounded border border-slate-300 px-2 py-1 text-sm">
-                  <option value="true">Veg</option>
-                  <option value="false">Non-Veg</option>
-                </select>
+                {isVegEnabled ? (
+                  <select value={itemVeg ? 'true' : 'false'} onChange={(e) => setItemVeg(e.target.value === 'true')} className="rounded border border-slate-300 px-2 py-1 text-sm">
+                    <option value="true">Veg</option>
+                    <option value="false">Non-Veg</option>
+                  </select>
+                ) : null}
                 <button className="rounded bg-slate-900 px-3 py-1 text-sm text-white">Add item</button>
                 <input value={itemImage} onChange={(e) => setItemImage(e.target.value)} className="rounded border border-slate-300 px-2 py-1 text-sm md:col-span-4" placeholder="Image URL (optional)" />
                 <StorageUploader folder="items" onUploaded={(url) => setItemImage(url)} />
@@ -703,6 +891,28 @@ export default function SuperadminMenuPage() {
                     item={item}
                     variants={variantsByItem.get(item.id) || []}
                     categoryId={category.id}
+                    isVegEnabled={isVegEnabled}
+                    isDraggingItem={dragItemId === item.id}
+                    onItemDragStart={setDragItemId}
+                    onItemDragEnd={() => {
+                      setDragItemId(null)
+                      setItemDropTarget(null)
+                    }}
+                    onItemDragOver={(e) => {
+                      e.preventDefault()
+                      if (!dragItemId || dragItemId === item.id) return
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const position: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+                      setItemDropTarget({ id: item.id, position })
+                    }}
+                    onItemDrop={(targetId) => {
+                      if (!dragItemId) return
+                      const position = itemDropTarget?.id === targetId ? itemDropTarget.position : 'after'
+                      reorderItems(dragItemId, targetId, position)
+                      setDragItemId(null)
+                      setItemDropTarget(null)
+                    }}
+                    dropIndicatorPosition={itemDropTarget?.id === item.id ? itemDropTarget.position : null}
                     onStatus={setStatus}
                     onUpdateItem={updateItem}
                     onDeleteItem={deleteItem}

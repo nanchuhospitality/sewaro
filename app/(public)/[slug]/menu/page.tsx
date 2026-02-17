@@ -132,5 +132,5 @@ export default async function PublicMenuRoutePage({ params }: { params: { slug: 
   const data = await getMenuData(slug)
   if (!data) notFound()
 
-  return <MenuView business={data.business} categories={data.categories} items={data.items} variants={data.variants} room={null} />
+  return <MenuView business={data.business} categories={data.categories} items={data.items} variants={data.variants} room={null} showKitchenClosedPartnerBanner />
 }

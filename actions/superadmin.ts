@@ -88,9 +88,14 @@ export async function updateBusiness(formData: FormData) {
   const isActive = String(formData.get('is_active') || 'true') === 'true'
   const enableNovaDeliversMenu = String(formData.get('enable_nova_delivers_menu') || 'false') === 'true'
   const enableNovaDeliversOrdering = String(formData.get('enable_nova_delivers_ordering') || 'false') === 'true'
-  const commissionPercent = Number(formData.get('nova_delivers_commission_percent'))
-  const deliveryChargeNpr = Number(formData.get('nova_delivers_delivery_charge_npr'))
+  const commissionPercent = Number(formData.get('nova_delivers_commission_percent') || 0)
+  const deliveryChargeNpr = Number(formData.get('nova_delivers_delivery_charge_npr') || 0)
   const supportPhone = String(formData.get('nova_delivers_support_phone') || '').trim() || null
+  const enableNovaMartMenu = String(formData.get('enable_nova_mart_menu') || 'false') === 'true'
+  const enableNovaMartOrdering = String(formData.get('enable_nova_mart_ordering') || 'false') === 'true'
+  const novaMartCommissionPercent = Number(formData.get('nova_mart_commission_percent') || 0)
+  const novaMartDeliveryChargeNpr = Number(formData.get('nova_mart_delivery_charge_npr') || 0)
+  const novaMartSupportPhone = String(formData.get('nova_mart_support_phone') || '').trim() || null
 
   if (!id) return { error: 'Missing business id.' }
   if (!name) return { error: 'Business name is required.' }
@@ -99,6 +104,12 @@ export async function updateBusiness(formData: FormData) {
   }
   if (!Number.isInteger(deliveryChargeNpr) || deliveryChargeNpr < 0) {
     return { error: 'Delivery charge must be a non-negative whole number.' }
+  }
+  if (!Number.isInteger(novaMartCommissionPercent) || novaMartCommissionPercent < 0) {
+    return { error: 'Nova Mart commission must be a non-negative whole number.' }
+  }
+  if (!Number.isInteger(novaMartDeliveryChargeNpr) || novaMartDeliveryChargeNpr < 0) {
+    return { error: 'Nova Mart delivery charge must be a non-negative whole number.' }
   }
 
   const slugErr = validateBusinessSlug(slug)
@@ -124,6 +135,11 @@ export async function updateBusiness(formData: FormData) {
       nova_delivers_commission_percent: commissionPercent,
       nova_delivers_delivery_charge_npr: deliveryChargeNpr,
       nova_delivers_support_phone: supportPhone,
+      enable_nova_mart_menu: enableNovaMartMenu,
+      enable_nova_mart_ordering: enableNovaMartOrdering,
+      nova_mart_commission_percent: novaMartCommissionPercent,
+      nova_mart_delivery_charge_npr: novaMartDeliveryChargeNpr,
+      nova_mart_support_phone: novaMartSupportPhone,
     })
     .eq('id', id)
   const schemaError = withNovaFlag.error?.message?.toLowerCase() || ''
@@ -134,10 +150,15 @@ export async function updateBusiness(formData: FormData) {
       schemaError.includes('enable_nova_delivers_ordering') ||
       schemaError.includes('nova_delivers_commission_percent') ||
       schemaError.includes('nova_delivers_delivery_charge_npr') ||
-      schemaError.includes('nova_delivers_support_phone')
+      schemaError.includes('nova_delivers_support_phone') ||
+      schemaError.includes('enable_nova_mart_menu') ||
+      schemaError.includes('enable_nova_mart_ordering') ||
+      schemaError.includes('nova_mart_commission_percent') ||
+      schemaError.includes('nova_mart_delivery_charge_npr') ||
+      schemaError.includes('nova_mart_support_phone')
     )
   ) {
-    return { error: 'Nova Delivers partner fields are not available yet. Run migrations 0016_add_business_enable_nova_delivers_menu.sql, 0017_add_nova_delivers_partner_fields.sql, 0019_add_business_enable_nova_delivers_ordering.sql, and 0020_add_business_nova_delivers_support_phone.sql, then refresh.' }
+    return { error: 'Nova partner fields are not available yet. Run migrations 0016_add_business_enable_nova_delivers_menu.sql, 0017_add_nova_delivers_partner_fields.sql, 0019_add_business_enable_nova_delivers_ordering.sql, 0020_add_business_nova_delivers_support_phone.sql, and 0027_add_nova_mart_partner_fields.sql, then refresh.' }
   } else if (withNovaFlag.error) {
     return { error: friendlyError(withNovaFlag.error.message) }
   }

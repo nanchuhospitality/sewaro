@@ -29,11 +29,12 @@ export default async function SuperadminBusinessDetailPage({
 }) {
   const { supabase } = await requireRole('SUPERADMIN')
   let novaDeliversSupported = true
+  let novaMartSupported = true
   const tab = (searchParams?.tab || 'overview').toLowerCase()
 
   const withNovaFlag = await supabase
     .from('businesses')
-    .select('id,name,slug,phone,is_active,enable_nova_delivers_menu,enable_nova_delivers_ordering,nova_delivers_commission_percent,nova_delivers_delivery_charge_npr,nova_delivers_support_phone,created_at')
+    .select('id,name,slug,phone,is_active,enable_nova_delivers_menu,enable_nova_delivers_ordering,nova_delivers_commission_percent,nova_delivers_delivery_charge_npr,nova_delivers_support_phone,enable_nova_mart_menu,enable_nova_mart_ordering,nova_mart_commission_percent,nova_mart_delivery_charge_npr,nova_mart_support_phone,created_at')
     .eq('id', params.id)
     .maybeSingle()
   let business = withNovaFlag.data
@@ -45,10 +46,32 @@ export default async function SuperadminBusinessDetailPage({
       schemaError.includes('enable_nova_delivers_ordering') ||
       schemaError.includes('nova_delivers_commission_percent') ||
       schemaError.includes('nova_delivers_delivery_charge_npr') ||
-      schemaError.includes('nova_delivers_support_phone')
+      schemaError.includes('nova_delivers_support_phone') ||
+      schemaError.includes('enable_nova_mart_menu') ||
+      schemaError.includes('enable_nova_mart_ordering') ||
+      schemaError.includes('nova_mart_commission_percent') ||
+      schemaError.includes('nova_mart_delivery_charge_npr') ||
+      schemaError.includes('nova_mart_support_phone')
     )
   ) {
-    novaDeliversSupported = false
+    if (
+      schemaError.includes('enable_nova_delivers_menu') ||
+      schemaError.includes('enable_nova_delivers_ordering') ||
+      schemaError.includes('nova_delivers_commission_percent') ||
+      schemaError.includes('nova_delivers_delivery_charge_npr') ||
+      schemaError.includes('nova_delivers_support_phone')
+    ) {
+      novaDeliversSupported = false
+    }
+    if (
+      schemaError.includes('enable_nova_mart_menu') ||
+      schemaError.includes('enable_nova_mart_ordering') ||
+      schemaError.includes('nova_mart_commission_percent') ||
+      schemaError.includes('nova_mart_delivery_charge_npr') ||
+      schemaError.includes('nova_mart_support_phone')
+    ) {
+      novaMartSupported = false
+    }
     const fallback = await supabase
       .from('businesses')
       .select('id,name,slug,phone,is_active,created_at')
@@ -62,6 +85,11 @@ export default async function SuperadminBusinessDetailPage({
         nova_delivers_commission_percent: 0,
         nova_delivers_delivery_charge_npr: 0,
         nova_delivers_support_phone: null,
+        enable_nova_mart_menu: false,
+        enable_nova_mart_ordering: false,
+        nova_mart_commission_percent: 0,
+        nova_mart_delivery_charge_npr: 0,
+        nova_mart_support_phone: null,
       }
     }
   }
@@ -116,8 +144,8 @@ export default async function SuperadminBusinessDetailPage({
         <>
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold">Business Admin</h2>
-            <p className="text-sm text-slate-600">Manage business status and Nova Delivers access.</p>
-            <BusinessEditForm business={business} novaDeliversSupported={novaDeliversSupported} />
+            <p className="text-sm text-slate-600">Manage business status and Nova partner program access.</p>
+            <BusinessEditForm business={business} novaDeliversSupported={novaDeliversSupported} novaMartSupported={novaMartSupported} />
           </div>
 
           <BusinessAdminCredentialsForm

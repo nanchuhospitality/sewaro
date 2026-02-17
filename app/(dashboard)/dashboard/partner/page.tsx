@@ -52,7 +52,7 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
 
   const withPartner = await supabase
     .from('businesses')
-    .select('id,name,slug,is_active,enable_nova_delivers_menu,enable_nova_delivers_ordering,nova_delivers_commission_percent,nova_delivers_delivery_charge_npr,nova_delivers_support_phone')
+    .select('id,name,slug,is_active,enable_nova_delivers_menu,enable_nova_delivers_ordering,nova_delivers_commission_percent,nova_delivers_delivery_charge_npr,nova_delivers_support_phone,enable_nova_mart_menu,enable_nova_mart_ordering,nova_mart_commission_percent,nova_mart_delivery_charge_npr,nova_mart_support_phone')
     .eq('id', profile.business_id)
     .maybeSingle()
 
@@ -65,7 +65,12 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
       schemaError.includes('enable_nova_delivers_ordering') ||
       schemaError.includes('nova_delivers_delivery_charge_npr') ||
       schemaError.includes('nova_delivers_support_phone') ||
-      schemaError.includes('nova_delivers_commission_percent')
+      schemaError.includes('nova_delivers_commission_percent') ||
+      schemaError.includes('enable_nova_mart_menu') ||
+      schemaError.includes('enable_nova_mart_ordering') ||
+      schemaError.includes('nova_mart_commission_percent') ||
+      schemaError.includes('nova_mart_delivery_charge_npr') ||
+      schemaError.includes('nova_mart_support_phone')
     )
   ) {
     const fallback = await supabase
@@ -81,6 +86,11 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
           nova_delivers_commission_percent: 0,
           nova_delivers_delivery_charge_npr: 0,
           nova_delivers_support_phone: null,
+          enable_nova_mart_menu: false,
+          enable_nova_mart_ordering: false,
+          nova_mart_commission_percent: 0,
+          nova_mart_delivery_charge_npr: 0,
+          nova_mart_support_phone: null,
         }
       : null
   }
@@ -293,6 +303,32 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
           <Link href="/dashboard/partner/settings" className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700">
             Nova Delivers Settings
           </Link>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-sm text-slate-500">Nova Mart Program</p>
+        <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Menu</p>
+            <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_menu ? 'Enabled' : 'Disabled'}</p>
+          </div>
+          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Ordering</p>
+            <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_ordering ? 'Enabled' : 'Disabled'}</p>
+          </div>
+          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Commission Percent</p>
+            <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_commission_percent || 0)}%</p>
+          </div>
+          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Delivery Charge</p>
+            <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_delivery_charge_npr || 0)}</p>
+          </div>
+          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 sm:col-span-2">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Support Phone</p>
+            <p className="mt-1 font-medium text-slate-900">{business.nova_mart_support_phone || 'Not set'}</p>
+          </div>
         </div>
       </div>
 

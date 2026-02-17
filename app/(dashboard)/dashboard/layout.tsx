@@ -27,21 +27,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
     )
   }
 
-  let business: { name: string; slug: string; enable_nova_delivers_menu: boolean } | null = null
+  let business: { name: string; slug: string; enable_nova_delivers_menu: boolean; enable_nova_mart_menu: boolean } | null = null
   if (profile.business_id) {
     const withNovaFlag = await supabase
       .from('businesses')
-      .select('name,slug,enable_nova_delivers_menu')
+      .select('name,slug,enable_nova_delivers_menu,enable_nova_mart_menu')
       .eq('id', profile.business_id)
       .maybeSingle()
 
     const schemaError = withNovaFlag.error?.message?.toLowerCase() || ''
     if (withNovaFlag.data) {
       business = withNovaFlag.data
-    } else if (withNovaFlag.error && schemaError.includes('enable_nova_delivers_menu')) {
+    } else if (
+      withNovaFlag.error &&
+      (schemaError.includes('enable_nova_delivers_menu') || schemaError.includes('enable_nova_mart_menu'))
+    ) {
       const fallback = await supabase.from('businesses').select('name,slug').eq('id', profile.business_id).maybeSingle()
       if (fallback.data) {
-        business = { ...fallback.data, enable_nova_delivers_menu: false }
+        business = { ...fallback.data, enable_nova_delivers_menu: false, enable_nova_mart_menu: false }
       }
     }
   }
@@ -62,13 +65,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </nav>
         <div className="mt-4 border-t border-slate-200 pt-3">
           <p className="px-2 text-xs uppercase tracking-wide text-slate-500">Partner</p>
-          {business?.enable_nova_delivers_menu && business.slug ? (
-            <Link href="/dashboard/partner" className="mt-2 block rounded px-2 py-1 text-sm hover:bg-slate-100">
-              Nova Delivers
-            </Link>
-          ) : (
-            <p className="mt-2 px-2 text-sm text-slate-400">Nova Delivers (disabled)</p>
-          )}
+          <div className="mt-2 space-y-1">
+            {business?.enable_nova_delivers_menu && business.slug ? (
+              <Link href="/dashboard/partner" className="block rounded px-2 py-1 text-sm hover:bg-slate-100">
+                Nova Delivers
+              </Link>
+            ) : (
+              <p className="px-2 text-sm text-slate-400">Nova Delivers (disabled)</p>
+            )}
+            {business?.enable_nova_mart_menu && business.slug ? (
+              <Link href="/dashboard/partner/settings" className="block rounded px-2 py-1 text-sm hover:bg-slate-100">
+                Nova Mart
+              </Link>
+            ) : (
+              <p className="px-2 text-sm text-slate-400">Nova Mart (disabled)</p>
+            )}
+          </div>
         </div>
         <div className="mt-4">
           <SignOutButton />

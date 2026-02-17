@@ -130,5 +130,5 @@ export default async function RoomMenuPage({ params }: { params: { slug: string;
   const data = await getMenuData(slug)
   if (!data) notFound()
 
-  return <MenuView business={data.business} categories={data.categories} items={data.items} variants={data.variants} room={room} />
+  return <MenuView business={data.business} categories={data.categories} items={data.items} variants={data.variants} room={room} showKitchenClosedPartnerBanner />
 }

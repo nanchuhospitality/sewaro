@@ -9,6 +9,7 @@ type CreateNovaOrderBody = {
   note?: string | null
   customer_phone?: string | null
   items?: Array<{
+    source?: 'DELIVERS' | 'MART'
     item_name?: string
     variant_name?: string | null
     quantity?: number
@@ -46,16 +47,17 @@ export async function POST(req: Request) {
 
   const { data: business, error: businessError } = await supabase
     .from('businesses')
-    .select('id,name,is_active,enable_nova_delivers_menu,enable_nova_delivers_ordering,nova_delivers_delivery_charge_npr')
+    .select('id,name,is_active,enable_nova_delivers_menu,enable_nova_delivers_ordering,nova_delivers_delivery_charge_npr,enable_nova_mart_menu,enable_nova_mart_ordering,nova_mart_delivery_charge_npr')
     .eq('id', businessId)
     .maybeSingle()
 
-  if (businessError || !business || !business.is_active || !business.enable_nova_delivers_menu || !business.enable_nova_delivers_ordering) {
+  if (businessError || !business || !business.is_active) {
     return NextResponse.json({ error: 'Ordering is not available for this business.' }, { status: 403 })
   }
 
   const normalizedItems = items
     .map((item) => ({
+      source: item.source === 'MART' ? 'MART' : 'DELIVERS',
       item_name: String(item.item_name || '').trim(),
       variant_name: String(item.variant_name || '').trim() || null,
       quantity: Number(item.quantity),
@@ -67,8 +69,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'No valid items found.' }, { status: 400 })
   }
 
+  const includesDelivers = normalizedItems.some((item) => item.source === 'DELIVERS')
+  const includesMart = normalizedItems.some((item) => item.source === 'MART')
+  if (includesDelivers && (!business.enable_nova_delivers_menu || !business.enable_nova_delivers_ordering)) {
+    return NextResponse.json({ error: 'Nova Delivers ordering is not enabled for this business.' }, { status: 403 })
+  }
+  if (includesMart && (!business.enable_nova_mart_menu || !business.enable_nova_mart_ordering)) {
+    return NextResponse.json({ error: 'Nova Mart ordering is not enabled for this business.' }, { status: 403 })
+  }
+
   const subtotalNpr = normalizedItems.reduce((sum, item) => sum + item.quantity * item.unit_price_npr, 0)
-  const deliveryChargeNpr = Math.max(0, Number(business.nova_delivers_delivery_charge_npr || 0))
+  const deliveryCandidates: number[] = []
+  if (includesDelivers) deliveryCandidates.push(Number(business.nova_delivers_delivery_charge_npr || 0))
+  if (includesMart) deliveryCandidates.push(Number(business.nova_mart_delivery_charge_npr || 0))
+  const deliveryChargeNpr = Math.max(0, deliveryCandidates.length > 0 ? Math.max(...deliveryCandidates) : 0)
   const totalNpr = subtotalNpr + deliveryChargeNpr
 
   const { data: order, error: orderError } = await supabase

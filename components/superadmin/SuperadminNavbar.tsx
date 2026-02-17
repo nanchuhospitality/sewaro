@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import SignOutButton from '@/components/auth/SignOutButton'
 
 function linkClass(active: boolean) {
@@ -12,9 +12,12 @@ function linkClass(active: boolean) {
 
 export default function SuperadminNavbar() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const isOverview = pathname === '/superadmin'
-  const isMenuBuilder = pathname === '/superadmin/menu'
-  const isNewBusiness = pathname === '/superadmin/businesses/new'
+  const isMenuPath = pathname === '/superadmin/menu'
+  const menuProgram = (searchParams.get('program') || 'delivers').toLowerCase()
+  const isMenuBuilderDelivers = isMenuPath && menuProgram !== 'mart'
+  const isMenuBuilderMart = isMenuPath && menuProgram === 'mart'
   const isOpsUsers = pathname === '/superadmin/ops'
 
   return (
@@ -25,11 +28,11 @@ export default function SuperadminNavbar() {
             <Link href="/superadmin" className={linkClass(isOverview)}>
               Businesses
             </Link>
-            <Link href="/superadmin/menu" className={linkClass(isMenuBuilder)}>
+            <Link href="/superadmin/menu?program=delivers" className={linkClass(isMenuBuilderDelivers)}>
               Nova Delivers Menu
             </Link>
-            <Link href="/superadmin/businesses/new" className={linkClass(isNewBusiness)}>
-              New business
+            <Link href="/superadmin/menu?program=mart" className={linkClass(isMenuBuilderMart)}>
+              Nova Mart Menu
             </Link>
             <Link href="/superadmin/ops" className={linkClass(isOpsUsers)}>
               Central Ops

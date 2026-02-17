@@ -99,3 +99,48 @@ export async function saveNovaDeliversMenu(payload: NovaMenuPayload) {
 
   return { success: true }
 }
+
+export async function getNovaMartMenu() {
+  const { supabase } = await requireRole('SUPERADMIN')
+  const { data, error } = await supabase
+    .from('nova_mart_menu')
+    .select('categories,items,variants')
+    .eq('id', 1)
+    .maybeSingle()
+
+  if (error) {
+    const schemaError = error.message.toLowerCase()
+    if (schemaError.includes('nova_mart_menu')) {
+      return { ...EMPTY_MENU, warning: 'Nova Mart menu table is not ready. Run migration 0028_create_nova_mart_menu.sql.' }
+    }
+    return { ...EMPTY_MENU, error: friendlyError(error.message) }
+  }
+
+  return normalizePayload(data)
+}
+
+export async function saveNovaMartMenu(payload: NovaMenuPayload) {
+  const { supabase } = await requireRole('SUPERADMIN')
+  const normalized = normalizePayload(payload)
+
+  const { error } = await supabase.from('nova_mart_menu').upsert(
+    {
+      id: 1,
+      categories: normalized.categories,
+      items: normalized.items,
+      variants: normalized.variants,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'id' }
+  )
+
+  if (error) {
+    const schemaError = error.message.toLowerCase()
+    if (schemaError.includes('nova_mart_menu')) {
+      return { error: 'Nova Mart menu table is not ready. Run migration 0028_create_nova_mart_menu.sql.' }
+    }
+    return { error: friendlyError(error.message) }
+  }
+
+  return { success: true }
+}
