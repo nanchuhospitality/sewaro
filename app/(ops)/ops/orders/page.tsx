@@ -5,6 +5,8 @@ import AutoRefresh from '@/components/ops/AutoRefresh'
 import NovaMenuItemPicker from '@/components/ops/NovaMenuItemPicker'
 import { buildNovaMenuOptions } from '@/lib/utils/novaMenu'
 
+type OrderStatus = 'NEW' | 'ACCEPTED' | 'PREPARING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED'
+
 function statusColor(status: string) {
   if (status === 'DELIVERED') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
   if (status === 'CANCELLED') return 'bg-red-50 text-red-700 border-red-200'
@@ -14,11 +16,31 @@ function statusColor(status: string) {
   return 'bg-slate-50 text-slate-700 border-slate-200'
 }
 
-export default async function CentralOpsOrdersPage({ searchParams }: { searchParams?: { status?: string; order?: string } }) {
+function minutesSince(iso: string) {
+  const ms = Date.now() - new Date(iso).getTime()
+  return Math.max(0, Math.floor(ms / 60000))
+}
+
+function isUrgentOrder(order: { status: string; created_at: string }) {
+  const age = minutesSince(order.created_at)
+  if (order.status === 'NEW') return age >= 5
+  if (order.status === 'ACCEPTED' || order.status === 'PREPARING') return age >= 15
+  if (order.status === 'OUT_FOR_DELIVERY') return age >= 25
+  return false
+}
+
+export default async function CentralOpsOrdersPage({
+  searchParams,
+}: {
+  searchParams?: { status?: string; order?: string; q?: string; priority?: string }
+}) {
   const { supabase } = await requireRole('CENTRAL_OPS')
 
-  const statusFilter = String(searchParams?.status || '').trim().toUpperCase()
+  const statusFilter = String(searchParams?.status || '').trim().toUpperCase() as OrderStatus | ''
   const selectedOrderId = String(searchParams?.order || '').trim()
+  const searchQuery = String(searchParams?.q || '').trim().toLowerCase()
+  const priorityFilter = String(searchParams?.priority || '').trim().toUpperCase()
+
   let ordersQuery = supabase
     .from('nova_orders')
     .select('id,order_code,business_name_snapshot,room,source,status,customer_phone,note,subtotal_npr,delivery_charge_npr,total_npr,created_at')
@@ -32,7 +54,7 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
   const { data: orders, error: ordersError } = await ordersQuery
   if (ordersError) {
     return (
-      <main className="mx-auto max-w-6xl px-4 py-8">
+      <main className="mx-auto max-w-7xl px-4 py-8">
         <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
           Could not load orders. Run migration <code>0023_create_nova_orders.sql</code> and refresh.
         </div>
@@ -67,18 +89,63 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
     itemsByOrder.get(item.order_id)!.push(item)
   }
 
-  const selectedOrder = (orders || []).find((order) => order.id === selectedOrderId) || null
-  const selectedOrderItems = selectedOrder ? (itemsByOrder.get(selectedOrder.id) || []) : []
+  const baseOrders = orders || []
+  const statusCounts = {
+    ALL: baseOrders.length,
+    NEW: baseOrders.filter((order) => order.status === 'NEW').length,
+    ACCEPTED: baseOrders.filter((order) => order.status === 'ACCEPTED').length,
+    PREPARING: baseOrders.filter((order) => order.status === 'PREPARING').length,
+    OUT_FOR_DELIVERY: baseOrders.filter((order) => order.status === 'OUT_FOR_DELIVERY').length,
+    DELIVERED: baseOrders.filter((order) => order.status === 'DELIVERED').length,
+    CANCELLED: baseOrders.filter((order) => order.status === 'CANCELLED').length,
+  }
+
+  let filteredOrders = baseOrders.filter((order) => {
+    if (!searchQuery) return true
+    const haystack = [order.order_code, order.business_name_snapshot, order.room || '', order.customer_phone || '', order.note || '']
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(searchQuery)
+  })
+
+  if (priorityFilter === 'URGENT') {
+    filteredOrders = filteredOrders.filter((order) => isUrgentOrder(order))
+  } else if (priorityFilter === 'NORMAL') {
+    filteredOrders = filteredOrders.filter((order) => !isUrgentOrder(order))
+  }
+
+  filteredOrders.sort((a, b) => {
+    const aUrgent = isUrgentOrder(a) ? 1 : 0
+    const bUrgent = isUrgentOrder(b) ? 1 : 0
+    if (aUrgent !== bUrgent) return bUrgent - aUrgent
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
+
+  const selectedOrder = filteredOrders.find((order) => order.id === selectedOrderId) || filteredOrders[0] || null
+  const selectedOrderItems = selectedOrder ? itemsByOrder.get(selectedOrder.id) || [] : []
+  const orderItemsLocked = selectedOrder ? !['NEW', 'ACCEPTED'].includes(selectedOrder.status) : true
+  const openOrders = filteredOrders.filter((order) => !['DELIVERED', 'CANCELLED'].includes(order.status))
+  const urgentOrders = filteredOrders.filter((order) => isUrgentOrder(order))
 
   const buildOrderHref = (orderId: string) => {
     const params = new URLSearchParams()
     if (statusFilter) params.set('status', statusFilter)
+    if (searchQuery) params.set('q', searchQuery)
+    if (priorityFilter) params.set('priority', priorityFilter)
     params.set('order', orderId)
     return `/ops/orders?${params.toString()}`
   }
 
+  const buildStatusHref = (status: string) => {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (searchQuery) params.set('q', searchQuery)
+    if (priorityFilter) params.set('priority', priorityFilter)
+    return `/ops/orders${params.toString() ? `?${params.toString()}` : ''}`
+  }
+
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
+    <main className="mx-auto max-w-7xl px-4 py-8">
       <AutoRefresh everyMs={4000} />
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h1 className="text-xl font-semibold">Central Ops</h1>
@@ -90,26 +157,78 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
             Support
           </Link>
         </div>
-        <p className="mt-3 text-sm text-slate-600">Manage Nova Delivers orders across all partner hotels.</p>
+        <p className="mt-3 text-sm text-slate-600">Urgency-first queue for fast triage at higher order volume.</p>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Visible Queue</p>
+            <p className="mt-1 text-xl font-semibold text-slate-900">{filteredOrders.length}</p>
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs uppercase tracking-wide text-amber-700">Urgent</p>
+            <p className="mt-1 text-xl font-semibold text-amber-900">{urgentOrders.length}</p>
+          </div>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+            <p className="text-xs uppercase tracking-wide text-blue-700">Active</p>
+            <p className="mt-1 text-xl font-semibold text-blue-900">{openOrders.length}</p>
+          </div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-xs uppercase tracking-wide text-emerald-700">Completed</p>
+            <p className="mt-1 text-xl font-semibold text-emerald-900">{filteredOrders.filter((order) => order.status === 'DELIVERED').length}</p>
+          </div>
+        </div>
+
+        <form className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+          {statusFilter ? <input type="hidden" name="status" value={statusFilter} /> : null}
+          <input
+            name="q"
+            defaultValue={searchQuery}
+            placeholder="Search code, hotel, room, phone"
+            className="min-w-[220px] flex-1 rounded border border-slate-300 bg-white px-3 py-2 text-sm"
+          />
+          <select name="priority" defaultValue={priorityFilter} className="rounded border border-slate-300 bg-white px-2 py-2 text-sm">
+            <option value="">All Priority</option>
+            <option value="URGENT">Urgent only</option>
+            <option value="NORMAL">Normal only</option>
+          </select>
+          <button className="rounded bg-slate-900 px-3 py-2 text-sm text-white">Apply</button>
+          <a href={buildStatusHref(statusFilter)} className="rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+            Reset Search
+          </a>
+        </form>
+
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          {['', 'NEW', 'ACCEPTED', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'].map((status) => (
+          {[
+            { status: '', label: 'ALL', count: statusCounts.ALL },
+            { status: 'NEW', label: 'NEW', count: statusCounts.NEW },
+            { status: 'ACCEPTED', label: 'ACCEPTED', count: statusCounts.ACCEPTED },
+            { status: 'PREPARING', label: 'PREPARING', count: statusCounts.PREPARING },
+            { status: 'OUT_FOR_DELIVERY', label: 'OUT_FOR_DELIVERY', count: statusCounts.OUT_FOR_DELIVERY },
+            { status: 'DELIVERED', label: 'DELIVERED', count: statusCounts.DELIVERED },
+            { status: 'CANCELLED', label: 'CANCELLED', count: statusCounts.CANCELLED },
+          ].map((row) => (
             <a
-              key={status || 'all'}
-              href={status ? `/ops/orders?status=${status}` : '/ops/orders'}
+              key={row.label}
+              href={buildStatusHref(row.status)}
               className={`rounded border px-2 py-1 ${
-                (status || '') === statusFilter ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'
+                (row.status || '') === statusFilter ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'
               }`}
             >
-              {status || 'ALL'}
+              {row.label} ({row.count})
             </a>
           ))}
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
         <div className="space-y-3">
-          {(orders || []).map((order) => {
-            const isSelected = selectedOrderId === order.id
+          {filteredOrders.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">No orders match this filter.</div>
+          ) : null}
+          {filteredOrders.map((order) => {
+            const isSelected = selectedOrder?.id === order.id
+            const ageMins = minutesSince(order.created_at)
+            const urgent = isUrgentOrder(order)
             return (
               <Link
                 key={order.id}
@@ -120,7 +239,15 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">{order.order_code}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-900">{order.order_code}</p>
+                      {urgent ? (
+                        <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                          URGENT
+                        </span>
+                      ) : null}
+                      <span className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{ageMins}m</span>
+                    </div>
                     <p className="text-sm text-slate-600">
                       {order.business_name_snapshot}
                       {order.room ? ` • Room ${order.room}` : ''}
@@ -148,7 +275,15 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
           ) : (
             <div className="space-y-3">
               <div>
-                <p className="text-sm font-semibold text-slate-900">{selectedOrder.order_code}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-900">{selectedOrder.order_code}</p>
+                  <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusColor(selectedOrder.status)}`}>
+                    {selectedOrder.status}
+                  </span>
+                  <span className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                    {minutesSince(selectedOrder.created_at)}m
+                  </span>
+                </div>
                 <p className="text-sm text-slate-600">
                   {selectedOrder.business_name_snapshot}
                   {selectedOrder.room ? ` • Room ${selectedOrder.room}` : ''}
@@ -189,12 +324,7 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
               >
                 <input type="hidden" name="order_id" value={selectedOrder.id} />
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Edit Order</p>
-                <input
-                  name="room"
-                  defaultValue={selectedOrder.room || ''}
-                  placeholder="Room"
-                  className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-                />
+                <input name="room" defaultValue={selectedOrder.room || ''} placeholder="Room" className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
                 <input
                   name="customer_phone"
                   defaultValue={selectedOrder.customer_phone || ''}
@@ -213,6 +343,11 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Items</p>
+                {orderItemsLocked ? (
+                  <p className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    Item editing is locked once an order is PREPARING or beyond.
+                  </p>
+                ) : null}
                 <div className="space-y-1.5">
                   {selectedOrderItems.map((item, index) => (
                     <div key={item.id || `${selectedOrder.id}-${index}`} className="space-y-1 rounded border border-slate-200 bg-white p-2">
@@ -226,15 +361,45 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
                         <input type="hidden" name="order_id" value={selectedOrder.id} />
                         <input type="hidden" name="order_item_id" value={item.id} />
                         <div className="grid grid-cols-1 gap-1">
-                          <input name="item_name" defaultValue={item.item_name} className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                          <input name="variant_name" defaultValue={item.variant_name || ''} placeholder="Variant (optional)" className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                          <input
+                            name="item_name"
+                            defaultValue={item.item_name}
+                            disabled={orderItemsLocked}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:bg-slate-100"
+                          />
+                          <input
+                            name="variant_name"
+                            defaultValue={item.variant_name || ''}
+                            placeholder="Variant (optional)"
+                            disabled={orderItemsLocked}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:bg-slate-100"
+                          />
                         </div>
                         <div className="grid grid-cols-3 gap-1">
-                          <input name="quantity" type="number" min={1} defaultValue={item.quantity} className="rounded border border-slate-300 px-2 py-1 text-xs" />
-                          <input name="unit_price_npr" type="number" min={0} defaultValue={item.unit_price_npr} className="rounded border border-slate-300 px-2 py-1 text-xs" />
+                          <input
+                            name="quantity"
+                            type="number"
+                            min={1}
+                            defaultValue={item.quantity}
+                            disabled={orderItemsLocked}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:bg-slate-100"
+                          />
+                          <input
+                            name="unit_price_npr"
+                            type="number"
+                            min={0}
+                            defaultValue={item.unit_price_npr}
+                            disabled={orderItemsLocked}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:bg-slate-100"
+                          />
                           <div className="flex items-center justify-end text-xs font-medium text-slate-700">{item.line_total_npr}</div>
                         </div>
-                        <button className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700">Save</button>
+                        <button
+                          disabled={orderItemsLocked}
+                          className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Save
+                        </button>
                       </form>
                       <form
                         action={async (formData) => {
@@ -244,7 +409,12 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
                       >
                         <input type="hidden" name="order_id" value={selectedOrder.id} />
                         <input type="hidden" name="order_item_id" value={item.id} />
-                        <button className="rounded border border-red-300 px-2 py-1 text-xs text-red-700">Delete</button>
+                        <button
+                          disabled={orderItemsLocked}
+                          className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
                       </form>
                     </div>
                   ))}
@@ -258,7 +428,7 @@ export default async function CentralOpsOrdersPage({ searchParams }: { searchPar
                 >
                   <input type="hidden" name="order_id" value={selectedOrder.id} />
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Add Item</p>
-                  <NovaMenuItemPicker options={novaMenuOptions} submitLabel="Add" />
+                  <NovaMenuItemPicker options={novaMenuOptions} submitLabel="Add" disabled={orderItemsLocked} />
                 </form>
                 {selectedOrder.note ? <p className="mt-2 text-xs text-slate-600">Note: {selectedOrder.note}</p> : null}
                 <div className="mt-3 border-t border-slate-200 pt-2 text-sm">

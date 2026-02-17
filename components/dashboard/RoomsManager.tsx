@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createRoom, deleteRoom } from '@/actions/rooms'
+import { createRoom, createRoomsFromCsv, deleteRoom } from '@/actions/rooms'
 import { buildQrImageUrl, formatRoomLabel } from '@/lib/utils/rooms'
 
 type Room = {
@@ -15,6 +15,7 @@ export default function RoomsManager({ slug, rooms, businessId }: { slug: string
   const router = useRouter()
   const [status, setStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null)
   const [pending, setPending] = useState(false)
+  const [csvPending, setCsvPending] = useState(false)
 
   const baseUrl = useMemo(() => {
     if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL
@@ -54,6 +55,57 @@ export default function RoomsManager({ slug, rooms, businessId }: { slug: string
             {pending ? 'Adding...' : 'Add Room'}
           </button>
         </form>
+
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-sm font-medium text-slate-900">Bulk Add Rooms (CSV)</p>
+          <p className="mt-1 text-xs text-slate-600">Use one room code per row, or include header `room_code` in first row.</p>
+          <div className="mt-2">
+            <a
+              href={`data:text/csv;charset=utf-8,${encodeURIComponent('room_code\n101\n102\ndeluxe-1\na-12')}`}
+              download="rooms-sample.csv"
+              className="text-xs font-medium text-slate-700 underline underline-offset-2"
+            >
+              Download sample CSV
+            </a>
+          </div>
+          <form
+            action={async (fd) => {
+              setCsvPending(true)
+              setStatus(null)
+              if (businessId) fd.set('business_id', businessId)
+              const res = await createRoomsFromCsv(fd)
+              setCsvPending(false)
+              if (res.error) {
+                setStatus({ type: 'error', message: res.error })
+                return
+              }
+              const summary = res.summary
+              if (!summary) {
+                setStatus({ type: 'success', message: 'CSV imported.' })
+                router.refresh()
+                return
+              }
+              const tail = summary.errorRows.length ? ` Errors: ${summary.errorRows.join(' | ')}` : ''
+              setStatus({
+                type: 'success',
+                message:
+                  `CSV imported. Created ${summary.created}/${summary.totalRows}. ` +
+                  `Skipped existing ${summary.skippedExisting}, duplicate rows ${summary.skippedDuplicateInCsv}, invalid ${summary.skippedInvalid}.` +
+                  tail,
+              })
+              router.refresh()
+            }}
+            className="mt-2 flex flex-wrap items-center gap-2"
+          >
+            <input name="file" type="file" accept=".csv,text/csv" required className="rounded border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+            <button
+              disabled={csvPending}
+              className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-60"
+            >
+              {csvPending ? 'Importing...' : 'Import CSV'}
+            </button>
+          </form>
+        </div>
 
         {status && (
           <p className={`mt-3 text-sm ${status.type === 'error' ? 'text-red-600' : 'text-emerald-700'}`}>

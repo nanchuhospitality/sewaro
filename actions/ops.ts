@@ -6,6 +6,25 @@ import { friendlyError } from '@/lib/utils/errors'
 import { ROOM_REGEX } from '@/lib/utils/constants'
 
 const ALLOWED_STATUSES = new Set(['NEW', 'ACCEPTED', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'])
+const ITEM_EDITABLE_ORDER_STATUSES = new Set(['NEW', 'ACCEPTED'])
+
+async function assertOrderItemsEditable(
+  supabase: Awaited<ReturnType<typeof requireRole>>['supabase'],
+  orderId: string
+) {
+  const { data: order, error } = await supabase
+    .from('nova_orders')
+    .select('id,status')
+    .eq('id', orderId)
+    .maybeSingle()
+
+  if (error || !order) return { error: friendlyError(error?.message || 'Order not found.') }
+  if (!ITEM_EDITABLE_ORDER_STATUSES.has(order.status)) {
+    return { error: 'Order items cannot be edited once order is PREPARING or beyond.' }
+  }
+
+  return { order }
+}
 
 async function recalcNovaOrderTotals(supabase: Awaited<ReturnType<typeof requireRole>>['supabase'], orderId: string) {
   const { data: order } = await supabase
@@ -116,6 +135,9 @@ export async function updateNovaOrderItem(formData: FormData) {
   if (!Number.isInteger(quantity) || quantity <= 0) return { error: 'Quantity must be a positive whole number.' }
   if (!Number.isInteger(unitPrice) || unitPrice < 0) return { error: 'Unit price must be a non-negative whole number.' }
 
+  const editable = await assertOrderItemsEditable(supabase, orderId)
+  if ('error' in editable) return { error: editable.error }
+
   const { error } = await supabase
     .from('nova_order_items')
     .update({
@@ -149,6 +171,9 @@ export async function addNovaOrderItem(formData: FormData) {
   if (!Number.isInteger(quantity) || quantity <= 0) return { error: 'Quantity must be a positive whole number.' }
   if (!Number.isInteger(unitPrice) || unitPrice < 0) return { error: 'Unit price must be a non-negative whole number.' }
 
+  const editable = await assertOrderItemsEditable(supabase, orderId)
+  if ('error' in editable) return { error: editable.error }
+
   const { error } = await supabase.from('nova_order_items').insert({
     order_id: orderId,
     item_name: itemName,
@@ -170,6 +195,9 @@ export async function deleteNovaOrderItem(formData: FormData) {
   const orderItemId = String(formData.get('order_item_id') || '').trim()
   const orderId = String(formData.get('order_id') || '').trim()
   if (!orderItemId || !orderId) return { error: 'Missing order item id.' }
+
+  const editable = await assertOrderItemsEditable(supabase, orderId)
+  if ('error' in editable) return { error: editable.error }
 
   const { error } = await supabase
     .from('nova_order_items')

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { ROOM_REGEX } from '@/lib/utils/constants'
 
 type CreateNovaOrderBody = {
@@ -25,7 +25,7 @@ function normalizePhone(value: string | null | undefined) {
 }
 
 export async function POST(req: Request) {
-  const supabase = createClient()
+  const supabase = createAdminClient()
   const body = (await req.json()) as CreateNovaOrderBody
 
   const businessId = String(body.business_id || '').trim()

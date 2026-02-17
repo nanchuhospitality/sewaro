@@ -3,7 +3,7 @@ import { requireRole } from '@/lib/auth/requireRole'
 import SignOutButton from '@/components/auth/SignOutButton'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { profile } = await requireRole()
+  const { profile, supabase } = await requireRole()
 
   if (profile.role === 'SUPERADMIN') {
     return (
@@ -27,9 +27,32 @@ export default async function DashboardLayout({ children }: { children: React.Re
     )
   }
 
+  let business: { name: string; slug: string; enable_nova_delivers_menu: boolean } | null = null
+  if (profile.business_id) {
+    const withNovaFlag = await supabase
+      .from('businesses')
+      .select('name,slug,enable_nova_delivers_menu')
+      .eq('id', profile.business_id)
+      .maybeSingle()
+
+    const schemaError = withNovaFlag.error?.message?.toLowerCase() || ''
+    if (withNovaFlag.data) {
+      business = withNovaFlag.data
+    } else if (withNovaFlag.error && schemaError.includes('enable_nova_delivers_menu')) {
+      const fallback = await supabase.from('businesses').select('name,slug').eq('id', profile.business_id).maybeSingle()
+      if (fallback.data) {
+        business = { ...fallback.data, enable_nova_delivers_menu: false }
+      }
+    }
+  }
+
   return (
     <div className="mx-auto grid max-w-6xl gap-6 px-4 py-8 md:grid-cols-[220px_1fr]">
       <aside className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 border-b border-slate-200 pb-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Hotel</p>
+          <p className="mt-1 text-sm font-semibold text-slate-900">{business?.name || 'No hotel linked'}</p>
+        </div>
         <nav className="space-y-2 text-sm">
           <Link href="/dashboard" className="block rounded px-2 py-1 hover:bg-slate-100">Overview</Link>
           <Link href="/dashboard/rooms" className="block rounded px-2 py-1 hover:bg-slate-100">Rooms & QR</Link>
@@ -37,6 +60,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <Link href="/dashboard/feedback" className="block rounded px-2 py-1 hover:bg-slate-100">Feedback</Link>
           <Link href="/dashboard/settings" className="block rounded px-2 py-1 hover:bg-slate-100">Settings</Link>
         </nav>
+        <div className="mt-4 border-t border-slate-200 pt-3">
+          <p className="px-2 text-xs uppercase tracking-wide text-slate-500">Partner</p>
+          {business?.enable_nova_delivers_menu && business.slug ? (
+            <Link href="/dashboard/partner" className="mt-2 block rounded px-2 py-1 text-sm hover:bg-slate-100">
+              Nova Delivers
+            </Link>
+          ) : (
+            <p className="mt-2 px-2 text-sm text-slate-400">Nova Delivers (disabled)</p>
+          )}
+        </div>
         <div className="mt-4">
           <SignOutButton />
         </div>
