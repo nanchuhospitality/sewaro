@@ -108,6 +108,7 @@ export async function POST(req: Request) {
 
   const orderItemsPayload = normalizedItems.map((item) => ({
     order_id: order.id,
+    source: item.source,
     item_name: item.item_name,
     variant_name: item.variant_name,
     quantity: item.quantity,
@@ -118,6 +119,10 @@ export async function POST(req: Request) {
   const { error: itemsError } = await supabase.from('nova_order_items').insert(orderItemsPayload)
   if (itemsError) {
     await supabase.from('nova_orders').delete().eq('id', order.id)
+    const schemaError = itemsError.message?.toLowerCase() || ''
+    if (schemaError.includes('source')) {
+      return NextResponse.json({ error: 'Order-item source schema is not up to date. Run migration 0030_add_nova_order_item_source.sql.' }, { status: 500 })
+    }
     return NextResponse.json({ error: itemsError.message }, { status: 500 })
   }
 

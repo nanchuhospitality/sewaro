@@ -209,6 +209,7 @@ export async function createManualNovaOrder(formData: FormData) {
   const { error: itemsError } = await supabase.from('nova_order_items').insert(
     normalizedItems.map((item) => ({
       order_id: order.id,
+      source: item.source,
       item_name: item.item_name,
       variant_name: item.variant_name,
       quantity: item.quantity,
@@ -218,6 +219,10 @@ export async function createManualNovaOrder(formData: FormData) {
   )
   if (itemsError) {
     await supabase.from('nova_orders').delete().eq('id', order.id)
+    const schemaError = itemsError.message?.toLowerCase() || ''
+    if (schemaError.includes('source')) {
+      return { error: 'Order-item source schema is not up to date. Run migration 0030_add_nova_order_item_source.sql.' }
+    }
     return { error: friendlyError(itemsError.message) }
   }
 
@@ -279,6 +284,7 @@ export async function updateNovaOrderItem(formData: FormData) {
   const orderId = String(formData.get('order_id') || '').trim()
   const itemName = String(formData.get('item_name') || '').trim()
   const variantName = String(formData.get('variant_name') || '').trim() || null
+  const itemSource = String(formData.get('item_source') || '').trim().toUpperCase() === 'MART' ? 'MART' : 'DELIVERS'
   const quantity = Number(formData.get('quantity'))
   const unitPrice = Number(formData.get('unit_price_npr'))
 
@@ -315,6 +321,7 @@ export async function addNovaOrderItem(formData: FormData) {
   const orderId = String(formData.get('order_id') || '').trim()
   const itemName = String(formData.get('item_name') || '').trim()
   const variantName = String(formData.get('variant_name') || '').trim() || null
+  const itemSource = String(formData.get('item_source') || '').trim().toUpperCase() === 'MART' ? 'MART' : 'DELIVERS'
   const quantity = Number(formData.get('quantity'))
   const unitPrice = Number(formData.get('unit_price_npr'))
 
@@ -328,13 +335,20 @@ export async function addNovaOrderItem(formData: FormData) {
 
   const { error } = await supabase.from('nova_order_items').insert({
     order_id: orderId,
+    source: itemSource,
     item_name: itemName,
     variant_name: variantName,
     quantity,
     unit_price_npr: unitPrice,
     line_total_npr: quantity * unitPrice,
   })
-  if (error) return { error: friendlyError(error.message) }
+  if (error) {
+    const schemaError = error.message?.toLowerCase() || ''
+    if (schemaError.includes('source')) {
+      return { error: 'Order-item source schema is not up to date. Run migration 0030_add_nova_order_item_source.sql.' }
+    }
+    return { error: friendlyError(error.message) }
+  }
 
   await recalcNovaOrderTotals(supabase, orderId)
   revalidatePath('/ops/orders')

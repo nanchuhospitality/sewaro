@@ -74,7 +74,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <p className="px-2 text-sm text-slate-400">Nova Delivers (disabled)</p>
             )}
             {business?.enable_nova_mart_menu && business.slug ? (
-              <Link href="/dashboard/partner/settings" className="block rounded px-2 py-1 text-sm hover:bg-slate-100">
+              <Link href="/dashboard/partner?partner=mart" className="block rounded px-2 py-1 text-sm hover:bg-slate-100">
                 Nova Mart
               </Link>
             ) : (

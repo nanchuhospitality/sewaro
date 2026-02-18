@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import JSZip from 'jszip'
 import { createRoom, createRoomsFromCsv, deleteRoom } from '@/actions/rooms'
 import { buildQrImageUrl, formatRoomLabel } from '@/lib/utils/rooms'
 
@@ -16,6 +17,7 @@ export default function RoomsManager({ slug, rooms, businessId }: { slug: string
   const [status, setStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null)
   const [pending, setPending] = useState(false)
   const [csvPending, setCsvPending] = useState(false)
+  const [zipPending, setZipPending] = useState(false)
 
   const baseUrl = useMemo(() => {
     if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL
@@ -23,11 +25,54 @@ export default function RoomsManager({ slug, rooms, businessId }: { slug: string
     return 'http://localhost:3000'
   }, [])
 
+  async function downloadAllQrZip() {
+    if (rooms.length === 0) return
+    setZipPending(true)
+    setStatus(null)
+    try {
+      const zip = new JSZip()
+      const base = baseUrl.replace(/\/$/, '')
+
+      for (const room of rooms) {
+        const homepageUrl = `${base}/${slug}/${room.room_code}`
+        const qrUrl = buildQrImageUrl(homepageUrl, 800)
+        const response = await fetch(qrUrl)
+        if (!response.ok) throw new Error(`Could not fetch QR for room ${room.room_code}.`)
+        const blob = await response.blob()
+        zip.file(`room-${room.room_code}.png`, blob)
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      const link = document.createElement('a')
+      const objectUrl = URL.createObjectURL(zipBlob)
+      link.href = objectUrl
+      link.download = `${slug}-rooms-qr.zip`
+      link.click()
+      URL.revokeObjectURL(objectUrl)
+      setStatus({ type: 'success', message: `Downloaded ${rooms.length} room QR files as ZIP.` })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not generate QR ZIP.'
+      setStatus({ type: 'error', message: msg })
+    } finally {
+      setZipPending(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h1 className="text-xl font-semibold">Hotel Rooms</h1>
         <p className="mt-1 text-sm text-slate-600">Create room codes and generate QR links for in-room dining menu.</p>
+        {rooms.length > 0 ? (
+          <button
+            type="button"
+            onClick={downloadAllQrZip}
+            disabled={zipPending}
+            className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 disabled:opacity-60"
+          >
+            {zipPending ? 'Preparing ZIP...' : 'Download All QRs (ZIP)'}
+          </button>
+        ) : null}
 
         <form
           action={async (fd) => {

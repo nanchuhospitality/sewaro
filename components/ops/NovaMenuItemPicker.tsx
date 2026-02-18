@@ -15,6 +15,7 @@ export default function NovaMenuItemPicker({
   const [query, setQuery] = useState('')
   const [itemName, setItemName] = useState('')
   const [variantName, setVariantName] = useState('')
+  const [itemSource, setItemSource] = useState<'DELIVERS' | 'MART'>('DELIVERS')
   const [quantity, setQuantity] = useState(1)
   const [unitPriceNpr, setUnitPriceNpr] = useState(0)
 
@@ -27,6 +28,7 @@ export default function NovaMenuItemPicker({
   }, [options, query])
 
   function applyOption(option: NovaMenuOption) {
+    setItemSource(option.key.startsWith('MART::') ? 'MART' : 'DELIVERS')
     setItemName(option.itemName)
     setVariantName(option.variantName)
     setUnitPriceNpr(option.unitPriceNpr)
@@ -71,6 +73,7 @@ export default function NovaMenuItemPicker({
         placeholder="Variant (optional)"
         className="rounded border border-slate-300 px-2 py-1 text-xs"
       />
+      <input type="hidden" name="item_source" value={itemSource} />
       <div className="grid grid-cols-2 gap-1">
         <input
           name="quantity"

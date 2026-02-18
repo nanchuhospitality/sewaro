@@ -1,7 +1,12 @@
 import { requireRole } from '@/lib/auth/requireRole'
 
-export default async function PartnerSettingsPage() {
+export default async function PartnerSettingsPage({
+  searchParams,
+}: {
+  searchParams?: { partner?: string }
+}) {
   const { profile, supabase } = await requireRole('BUSINESS_ADMIN')
+  const partner = String(searchParams?.partner || '').toLowerCase() === 'mart' ? 'mart' : 'delivers'
 
   if (!profile.business_id) {
     return <p className="text-sm text-slate-600">No business linked to this account yet.</p>
@@ -58,62 +63,64 @@ export default async function PartnerSettingsPage() {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h1 className="text-xl font-semibold">Partner Program Settings</h1>
+      <h1 className="text-xl font-semibold">{partner === 'mart' ? 'Nova Mart Settings' : 'Nova Delivers Settings'}</h1>
       <p className="mt-1 text-sm text-slate-600">Partner program settings for {business.name} (view only).</p>
       {schemaNotice ? <p className="mt-2 text-sm text-amber-700">{schemaNotice}</p> : null}
 
       <div className="mt-4 space-y-4">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-sm font-semibold text-slate-900">Nova Delivers</p>
-          <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Partner Menu</p>
-              <p className="mt-1 font-medium text-slate-900">{business.enable_nova_delivers_menu ? 'Enabled' : 'Disabled'}</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Ordering</p>
-              <p className="mt-1 font-medium text-slate-900">{business.enable_nova_delivers_ordering ? 'Enabled' : 'Disabled'}</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Commission Percent</p>
-              <p className="mt-1 font-medium text-slate-900">{Number(business.nova_delivers_commission_percent || 0)}%</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Delivery Charge</p>
-              <p className="mt-1 font-medium text-slate-900">{Number(business.nova_delivers_delivery_charge_npr || 0)}</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Support Phone</p>
-              <p className="mt-1 font-medium text-slate-900">{business.nova_delivers_support_phone || 'Not set'}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-sm font-semibold text-slate-900">Nova Mart</p>
-          <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Partner Menu</p>
-              <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_menu ? 'Enabled' : 'Disabled'}</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Ordering</p>
-              <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_ordering ? 'Enabled' : 'Disabled'}</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Commission Percent</p>
-              <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_commission_percent || 0)}%</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Delivery Charge</p>
-              <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_delivery_charge_npr || 0)}</p>
-            </div>
-            <div className="rounded border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Support Phone</p>
-              <p className="mt-1 font-medium text-slate-900">{business.nova_mart_support_phone || 'Not set'}</p>
+        {partner === 'delivers' ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-sm font-semibold text-slate-900">Nova Delivers</p>
+            <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Partner Menu</p>
+                <p className="mt-1 font-medium text-slate-900">{business.enable_nova_delivers_menu ? 'Enabled' : 'Disabled'}</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Ordering</p>
+                <p className="mt-1 font-medium text-slate-900">{business.enable_nova_delivers_ordering ? 'Enabled' : 'Disabled'}</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Commission Percent</p>
+                <p className="mt-1 font-medium text-slate-900">{Number(business.nova_delivers_commission_percent || 0)}%</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Delivery Charge</p>
+                <p className="mt-1 font-medium text-slate-900">{Number(business.nova_delivers_delivery_charge_npr || 0)}</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Support Phone</p>
+                <p className="mt-1 font-medium text-slate-900">{business.nova_delivers_support_phone || 'Not set'}</p>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-sm font-semibold text-slate-900">Nova Mart</p>
+            <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Partner Menu</p>
+                <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_menu ? 'Enabled' : 'Disabled'}</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Ordering</p>
+                <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_ordering ? 'Enabled' : 'Disabled'}</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Commission Percent</p>
+                <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_commission_percent || 0)}%</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Delivery Charge</p>
+                <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_delivery_charge_npr || 0)}</p>
+              </div>
+              <div className="rounded border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Support Phone</p>
+                <p className="mt-1 font-medium text-slate-900">{business.nova_mart_support_phone || 'Not set'}</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

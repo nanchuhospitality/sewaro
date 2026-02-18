@@ -35,7 +35,7 @@ function toInt(value: unknown) {
   return Math.max(0, Math.round(n))
 }
 
-export default async function PartnerDashboardPage({ searchParams }: { searchParams?: { range?: string } }) {
+export default async function PartnerDashboardPage({ searchParams }: { searchParams?: { range?: string; partner?: string } }) {
   const { profile, supabase } = await requireRole('BUSINESS_ADMIN')
   const admin = createAdminClient()
 
@@ -48,6 +48,8 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
   }
 
   const range = (['today', '7d', '30d', 'all'].includes(String(searchParams?.range || '7d')) ? String(searchParams?.range || '7d') : '7d') as RangeKey
+  const partnerKey = String(searchParams?.partner || '').toLowerCase() === 'mart' ? 'MART' : 'DELIVERS'
+  const partnerLabel = partnerKey === 'MART' ? 'Nova Mart' : 'Nova Delivers'
   const since = getSinceDate(range)
 
   const withPartner = await supabase
@@ -121,16 +123,58 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
     ordersErrorText = ordersRes.error?.message || 'Could not load orders.'
   }
 
-  const totalOrders = orders.length
-  const completedOrders = orders.filter((order) => order.status === 'DELIVERED')
-  const failedOrders = orders.filter((order) => order.status === 'CANCELLED')
-  const inProgressOrders = orders.filter((order) => !['DELIVERED', 'CANCELLED'].includes(order.status))
+  const orderIds = orders.map((order) => order.id)
+  type OrderItemRow = { order_id: string; source: 'DELIVERS' | 'MART'; item_name: string; quantity: number; line_total_npr: number }
+  let orderItems: OrderItemRow[] = []
+  if (orderIds.length > 0) {
+    const itemsRes = await admin
+      .from('nova_order_items')
+      .select('order_id,source,item_name,quantity,line_total_npr')
+      .in('order_id', orderIds)
+    const schemaError = itemsRes.error?.message?.toLowerCase() || ''
+    if (itemsRes.data) {
+      orderItems = (itemsRes.data as any[]).map((row) => ({
+        order_id: String(row.order_id),
+        source: row.source === 'MART' ? 'MART' : 'DELIVERS',
+        item_name: String(row.item_name || ''),
+        quantity: toInt(row.quantity),
+        line_total_npr: toInt(row.line_total_npr),
+      }))
+    } else if (itemsRes.error && schemaError.includes('source')) {
+      const fallbackItems = await admin
+        .from('nova_order_items')
+        .select('order_id,item_name,quantity,line_total_npr')
+        .in('order_id', orderIds)
+      orderItems = (fallbackItems.data as any[] || []).map((row) => ({
+        order_id: String(row.order_id),
+        source: 'DELIVERS',
+        item_name: String(row.item_name || ''),
+        quantity: toInt(row.quantity),
+        line_total_npr: toInt(row.line_total_npr),
+      }))
+    }
+  }
 
-  const grossSales = completedOrders.reduce((sum, order) => sum + toInt(order.subtotal_npr), 0)
+  const orderPartnerMap = new Map<string, Set<'DELIVERS' | 'MART'>>()
+  for (const item of orderItems) {
+    if (!orderPartnerMap.has(item.order_id)) orderPartnerMap.set(item.order_id, new Set())
+    orderPartnerMap.get(item.order_id)!.add(item.source)
+  }
+
+  const filteredOrders = orders.filter((order) => orderPartnerMap.get(order.id)?.has(partnerKey as 'DELIVERS' | 'MART'))
+  const totalOrders = filteredOrders.length
+  const completedOrders = filteredOrders.filter((order) => order.status === 'DELIVERED')
+  const failedOrders = filteredOrders.filter((order) => order.status === 'CANCELLED')
+  const inProgressOrders = filteredOrders.filter((order) => !['DELIVERED', 'CANCELLED'].includes(order.status))
+
+  const completedOrderIdSet = new Set(completedOrders.map((order) => order.id))
+  const partnerCompletedItems = orderItems.filter((item) => item.source === partnerKey && completedOrderIdSet.has(item.order_id))
+
+  const grossSales = partnerCompletedItems.reduce((sum, item) => sum + toInt(item.line_total_npr), 0)
   const deliveryCollected = completedOrders.reduce((sum, order) => sum + toInt(order.delivery_charge_npr), 0)
   const totalCustomerPaid = completedOrders.reduce((sum, order) => sum + toInt(order.total_npr), 0)
 
-  const commissionPercent = toInt(business.nova_delivers_commission_percent)
+  const commissionPercent = partnerKey === 'MART' ? toInt(business.nova_mart_commission_percent) : toInt(business.nova_delivers_commission_percent)
   const commissionEarned = Math.round(grossSales * (commissionPercent / 100))
 
   const completionRate = totalOrders > 0 ? Math.round((completedOrders.length / totalOrders) * 100) : 0
@@ -138,7 +182,7 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
   const avgOrderValue = completedOrders.length > 0 ? Math.round(totalCustomerPaid / completedOrders.length) : 0
 
   const byDateMap = new Map<string, { total: number; delivered: number; cancelled: number }>()
-  for (const order of orders) {
+  for (const order of filteredOrders) {
     const day = order.created_at.slice(0, 10)
     if (!byDateMap.has(day)) byDateMap.set(day, { total: 0, delivered: 0, cancelled: 0 })
     const row = byDateMap.get(day)!
@@ -151,7 +195,7 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
     .slice(0, 10)
 
   const roomMap = new Map<string, number>()
-  for (const order of orders) {
+  for (const order of filteredOrders) {
     const room = (order.room || 'No room').toUpperCase()
     roomMap.set(room, (roomMap.get(room) || 0) + 1)
   }
@@ -160,31 +204,23 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
     .sort((a, b) => b.count - a.count)
     .slice(0, 5)
 
-  const ordersForItems = completedOrders
-  const itemOrderIds = ordersForItems.map((order) => order.id)
   const itemMap = new Map<string, number>()
-  if (itemOrderIds.length > 0) {
-    const itemsRes = await admin
-      .from('nova_order_items')
-      .select('order_id,item_name,quantity')
-      .in('order_id', itemOrderIds)
-    for (const item of itemsRes.data || []) {
-      const key = String(item.item_name || '').trim() || 'Unknown item'
-      itemMap.set(key, (itemMap.get(key) || 0) + toInt(item.quantity))
-    }
+  for (const item of partnerCompletedItems) {
+    const key = String(item.item_name || '').trim() || 'Unknown item'
+    itemMap.set(key, (itemMap.get(key) || 0) + toInt(item.quantity))
   }
   const topItems = [...itemMap.entries()]
     .map(([name, qty]) => ({ name, qty }))
     .sort((a, b) => b.qty - a.qty)
     .slice(0, 5)
-  const recentOrders = orders.slice(0, 50)
+  const recentOrders = filteredOrders.slice(0, 50)
 
-  const rangeHref = (next: RangeKey) => `/dashboard/partner?range=${next}`
+  const rangeHref = (next: RangeKey) => `/dashboard/partner?partner=${partnerKey.toLowerCase()}&range=${next}`
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h1 className="text-2xl font-semibold">Nova Delivers Dashboard</h1>
+        <h1 className="text-2xl font-semibold">{partnerLabel} Dashboard</h1>
         <p className="mt-1 text-sm text-slate-600">Owner analytics for {business.name}.</p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <a href={rangeHref('today')} className={`rounded border px-2 py-1 ${range === 'today' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300'}`}>Today</a>
@@ -194,9 +230,9 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
         </div>
       </div>
 
-      {!business.enable_nova_delivers_menu ? (
+      {(partnerKey === 'DELIVERS' ? !business.enable_nova_delivers_menu : !business.enable_nova_mart_menu) ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Nova Delivers is currently disabled for this business.
+          {partnerLabel} is currently disabled for this business.
         </div>
       ) : null}
 
@@ -237,7 +273,7 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
             <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-100 px-3 py-2">
               <p className="text-xs uppercase tracking-wide text-emerald-800">Commission Earned</p>
               <p className="mt-1 text-2xl font-bold text-emerald-950">{commissionEarned}</p>
-              <p className="text-xs text-emerald-800">{commissionPercent}% on delivered subtotal</p>
+              <p className="text-xs text-emerald-800">{commissionPercent}% on delivered {partnerLabel} item subtotal</p>
             </div>
           </div>
         </div>
@@ -248,8 +284,8 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
             <div className="flex items-center justify-between"><span className="text-slate-600">Completion Rate</span><span className="font-semibold">{completionRate}%</span></div>
             <div className="flex items-center justify-between"><span className="text-slate-600">Cancellation Rate</span><span className="font-semibold">{cancellationRate}%</span></div>
             <div className="flex items-center justify-between"><span className="text-slate-600">Average Order Value</span><span className="font-semibold">{avgOrderValue}</span></div>
-            <div className="mt-2 border-t border-slate-200 pt-2 flex items-center justify-between"><span className="text-slate-600">Ordering Status</span><span className="font-semibold">{business.enable_nova_delivers_ordering ? 'Enabled' : 'Disabled'}</span></div>
-            <div className="flex items-center justify-between"><span className="text-slate-600">Support Phone</span><span className="font-semibold">{business.nova_delivers_support_phone || 'Not set'}</span></div>
+            <div className="mt-2 border-t border-slate-200 pt-2 flex items-center justify-between"><span className="text-slate-600">Ordering Status</span><span className="font-semibold">{partnerKey === 'MART' ? (business.enable_nova_mart_ordering ? 'Enabled' : 'Disabled') : (business.enable_nova_delivers_ordering ? 'Enabled' : 'Disabled')}</span></div>
+            <div className="flex items-center justify-between"><span className="text-slate-600">Support Phone</span><span className="font-semibold">{partnerKey === 'MART' ? (business.nova_mart_support_phone || 'Not set') : (business.nova_delivers_support_phone || 'Not set')}</span></div>
           </div>
         </div>
       </div>
@@ -297,38 +333,12 @@ export default async function PartnerDashboardPage({ searchParams }: { searchPar
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap gap-2">
-          <a href={`/${business.slug}/partner-menu`} target="_blank" rel="noreferrer" className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white">
+          <a href={partnerKey === 'MART' ? `/${business.slug}/mart-menu` : `/${business.slug}/partner-menu`} target="_blank" rel="noreferrer" className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white">
             Open Public Partner Menu
           </a>
-          <Link href="/dashboard/partner/settings" className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700">
-            Nova Delivers Settings
+          <Link href={`/dashboard/partner/settings?partner=${partnerKey.toLowerCase()}`} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700">
+            {partnerLabel} Settings
           </Link>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-sm text-slate-500">Nova Mart Program</p>
-        <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Menu</p>
-            <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_menu ? 'Enabled' : 'Disabled'}</p>
-          </div>
-          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Ordering</p>
-            <p className="mt-1 font-medium text-slate-900">{business.enable_nova_mart_ordering ? 'Enabled' : 'Disabled'}</p>
-          </div>
-          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Commission Percent</p>
-            <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_commission_percent || 0)}%</p>
-          </div>
-          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Delivery Charge</p>
-            <p className="mt-1 font-medium text-slate-900">{Number(business.nova_mart_delivery_charge_npr || 0)}</p>
-          </div>
-          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 sm:col-span-2">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Support Phone</p>
-            <p className="mt-1 font-medium text-slate-900">{business.nova_mart_support_phone || 'Not set'}</p>
-          </div>
         </div>
       </div>
 
