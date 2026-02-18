@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { requireRole } from '@/lib/auth/requireRole'
-import { addNovaOrderItem, deleteNovaOrderItem, updateNovaOrderDetails, updateNovaOrderItem, updateNovaOrderStatus } from '@/actions/ops'
+import { addNovaOrderItem, createManualNovaOrder, deleteNovaOrderItem, updateNovaOrderDetails, updateNovaOrderItem, updateNovaOrderStatus } from '@/actions/ops'
 import AutoRefresh from '@/components/ops/AutoRefresh'
+import ManualOrderCreateForm from '@/components/ops/ManualOrderCreateForm'
 import NovaMenuItemPicker from '@/components/ops/NovaMenuItemPicker'
 import { buildNovaMenuOptions } from '@/lib/utils/novaMenu'
 
@@ -80,8 +81,25 @@ export default async function CentralOpsOrdersPage({
         }>,
       }
 
-  const { data: novaMenuRow } = await supabase.from('nova_delivers_menu').select('items,variants').eq('id', 1).maybeSingle()
-  const novaMenuOptions = buildNovaMenuOptions(novaMenuRow || null)
+  const { data: novaDeliversMenuRow } = await supabase.from('nova_delivers_menu').select('items,variants').eq('id', 1).maybeSingle()
+  const { data: novaMartMenuRow } = await supabase.from('nova_mart_menu').select('items,variants').eq('id', 1).maybeSingle()
+  const novaMenuOptions = [
+    ...buildNovaMenuOptions(novaDeliversMenuRow || null).map((option) => ({
+      ...option,
+      key: `DELIVERS::${option.key}`,
+      label: `[Delivers] ${option.label}`,
+    })),
+    ...buildNovaMenuOptions(novaMartMenuRow || null).map((option) => ({
+      ...option,
+      key: `MART::${option.key}`,
+      label: `[Mart] ${option.label}`,
+    })),
+  ]
+  const { data: hotels } = await supabase
+    .from('businesses')
+    .select('id,name,google_business_map_link,google_map_link,is_active')
+    .eq('is_active', true)
+    .order('name', { ascending: true })
 
   const itemsByOrder = new Map<string, Array<{ id: string; item_name: string; variant_name: string | null; quantity: number; unit_price_npr: number; line_total_npr: number }>>()
   for (const item of orderItems || []) {
@@ -159,6 +177,8 @@ export default async function CentralOpsOrdersPage({
         </div>
         <p className="mt-3 text-sm text-slate-600">Urgency-first queue for fast triage at higher order volume.</p>
 
+        <ManualOrderCreateForm hotels={hotels || []} options={novaMenuOptions} onSubmitAction={createManualNovaOrder} />
+
         <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs uppercase tracking-wide text-slate-500">Visible Queue</p>
@@ -229,6 +249,7 @@ export default async function CentralOpsOrdersPage({
             const isSelected = selectedOrder?.id === order.id
             const ageMins = minutesSince(order.created_at)
             const urgent = isUrgentOrder(order)
+            const showAge = !['DELIVERED', 'CANCELLED'].includes(order.status)
             return (
               <Link
                 key={order.id}
@@ -246,7 +267,9 @@ export default async function CentralOpsOrdersPage({
                           URGENT
                         </span>
                       ) : null}
-                      <span className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{ageMins}m</span>
+                      {showAge ? (
+                        <span className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{ageMins}m</span>
+                      ) : null}
                     </div>
                     <p className="text-sm text-slate-600">
                       {order.business_name_snapshot}
@@ -280,9 +303,11 @@ export default async function CentralOpsOrdersPage({
                   <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusColor(selectedOrder.status)}`}>
                     {selectedOrder.status}
                   </span>
-                  <span className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                    {minutesSince(selectedOrder.created_at)}m
-                  </span>
+                  {!['DELIVERED', 'CANCELLED'].includes(selectedOrder.status) ? (
+                    <span className="rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                      {minutesSince(selectedOrder.created_at)}m
+                    </span>
+                  ) : null}
                 </div>
                 <p className="text-sm text-slate-600">
                   {selectedOrder.business_name_snapshot}
@@ -297,6 +322,7 @@ export default async function CentralOpsOrdersPage({
               </div>
 
               <form
+                key={`status-${selectedOrder.id}`}
                 action={async (formData) => {
                   'use server'
                   await updateNovaOrderStatus(formData)
@@ -316,6 +342,7 @@ export default async function CentralOpsOrdersPage({
               </form>
 
               <form
+                key={`details-${selectedOrder.id}`}
                 action={async (formData) => {
                   'use server'
                   await updateNovaOrderDetails(formData)

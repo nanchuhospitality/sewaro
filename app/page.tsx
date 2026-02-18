@@ -1,29 +1,17 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import GoogleIcon from '@/components/public/GoogleIcon'
 
 export default async function HomePage() {
   const supabase = createClient()
   const withLatest = await supabase
     .from('businesses')
-    .select('name,slug,google_map_link,show_review,is_active')
+    .select('name,slug,is_active')
     .eq('is_active', true)
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()
 
   let business = withLatest.data
-  const schemaError = withLatest.error?.message?.toLowerCase() || ''
-  if (!business && schemaError.includes('show_review')) {
-    const fallback = await supabase
-      .from('businesses')
-      .select('name,slug,google_map_link,is_active')
-      .eq('is_active', true)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    if (fallback.data) business = { ...fallback.data, show_review: true }
-  }
 
   return (
     <main className="relative overflow-hidden">
@@ -52,19 +40,6 @@ export default async function HomePage() {
               <Link href="/login" className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
                 Login to Dashboard
               </Link>
-              {business?.show_review && business.google_map_link ? (
-                <a
-                  href={business.google_map_link}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <GoogleIcon className="h-4 w-4" />
-                    <span>Google Review</span>
-                  </span>
-                </a>
-              ) : null}
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-3">

@@ -93,6 +93,7 @@ export default function MenuView({
   deliveryChargeBySource,
   showVegFilter = true,
   backHrefOverride = null,
+  showDietaryIcons = true,
 }: {
   business: Business
   categories: Category[]
@@ -115,6 +116,7 @@ export default function MenuView({
   deliveryChargeBySource?: Partial<Record<'DELIVERS' | 'MART', number>>
   showVegFilter?: boolean
   backHrefOverride?: string | null
+  showDietaryIcons?: boolean
 }) {
   const [search, setSearch] = useState('')
   const [vegOnly, setVegOnly] = useState(false)
@@ -123,10 +125,6 @@ export default function MenuView({
   const [cartNote, setCartNote] = useState('')
   const [checkoutOpen, setCheckoutOpen] = useState(false)
   const [checkoutStatus, setCheckoutStatus] = useState<string | null>(null)
-  const [showOtpForm, setShowOtpForm] = useState(false)
-  const [otpPhone, setOtpPhone] = useState('')
-  const [otpCode, setOtpCode] = useState('')
-  const [otpSent, setOtpSent] = useState(false)
   const [placingOrder, setPlacingOrder] = useState(false)
   const [creatingHelpTicket, setCreatingHelpTicket] = useState(false)
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
@@ -257,9 +255,11 @@ export default function MenuView({
     if (!anchor) return
     const target = document.getElementById(anchor)
     if (!target) return
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
     setActiveCategoryId(categoryId)
     setAllCategoriesOpen(false)
+    const stickyOffset = 120
+    const top = target.getBoundingClientRect().top + window.scrollY - stickyOffset
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
   }
 
   useEffect(() => {
@@ -270,35 +270,34 @@ export default function MenuView({
 
   useEffect(() => {
     if (orderedNavigableCategories.length === 0) return
-    const observers: IntersectionObserver[] = []
+    const activationOffset = 150
 
-    for (const category of orderedNavigableCategories) {
-      const anchor = categoryAnchors.get(category.id)
-      if (!anchor) continue
-      const el = document.getElementById(anchor)
-      if (!el) continue
+    const updateActiveCategory = () => {
+      let nextActive: string | null = orderedNavigableCategories[0]?.id || null
 
-      const observer = new IntersectionObserver(
-        (entries) => {
-          const visible = entries
-            .filter((entry) => entry.isIntersecting)
-            .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
-          if (visible[0]) {
-            setActiveCategoryId(category.id)
-          }
-        },
-        {
-          root: null,
-          rootMargin: '-30% 0px -55% 0px',
-          threshold: [0.1, 0.4, 0.7],
+      for (const category of orderedNavigableCategories) {
+        const anchor = categoryAnchors.get(category.id)
+        if (!anchor) continue
+        const el = document.getElementById(anchor)
+        if (!el) continue
+        const absoluteTop = el.getBoundingClientRect().top + window.scrollY
+        if (window.scrollY + activationOffset >= absoluteTop) {
+          nextActive = category.id
+        } else {
+          break
         }
-      )
-      observer.observe(el)
-      observers.push(observer)
+      }
+
+      if (nextActive) setActiveCategoryId(nextActive)
     }
 
+    updateActiveCategory()
+    window.addEventListener('scroll', updateActiveCategory, { passive: true })
+    window.addEventListener('resize', updateActiveCategory)
+
     return () => {
-      for (const observer of observers) observer.disconnect()
+      window.removeEventListener('scroll', updateActiveCategory)
+      window.removeEventListener('resize', updateActiveCategory)
     }
   }, [orderedNavigableCategories, categoryAnchors])
 
@@ -461,19 +460,7 @@ export default function MenuView({
     return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
   }, [whatsappPhone, cartSummary, cartLines, cartNote, business.name, room, partnerLabel])
 
-  function normalizeNepaliPhone(value: string) {
-    const cleaned = value.replace(/[^\d+]/g, '')
-    if (cleaned.startsWith('+977')) return cleaned.slice(4)
-    if (cleaned.startsWith('977')) return cleaned.slice(3)
-    return cleaned
-  }
-
-  function isValidNepaliMobile(value: string) {
-    const local = normalizeNepaliPhone(value)
-    return /^9\d{9}$/.test(local)
-  }
-
-  async function placeOrder(source: 'WHATSAPP' | 'OTP') {
+  async function placeOrder() {
     if (cartLines.length === 0) {
       setCheckoutStatus('Cart is empty.')
       return null
@@ -488,9 +475,9 @@ export default function MenuView({
         body: JSON.stringify({
           business_id: business.id,
           room,
-          source,
+          source: 'WHATSAPP',
           note: cartNote,
-          customer_phone: source === 'OTP' ? otpPhone : null,
+          customer_phone: null,
           items: cartLines.map((line) => ({
             source: line.source,
             item_name: line.item_name,
@@ -682,6 +669,11 @@ export default function MenuView({
                 <p className="mt-1 text-xs text-slate-100">Pharmacy &amp; Wellness | Alcohol | Midnight Cravings | More</p>
               </div>
             </div>
+            <div className="pointer-events-none absolute right-3 top-3">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/35 bg-black/35 text-sm font-semibold leading-none text-white">
+                {'>'}
+              </span>
+            </div>
           </div>
         </a>
       ) : null}
@@ -777,192 +769,131 @@ export default function MenuView({
             const hasChildItems = childCategories.some((child) => (itemsByCategory.get(child.id) || []).length > 0)
             if (catItems.length === 0 && !hasChildItems) return null
 
-            const renderItem = (item: Item) => (
-              <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {(() => {
-                        const itemVariants = variantsByItem.get(item.id) || []
-                        const effectiveTypes = new Set(
-                          itemVariants.map((variant) => (variant.is_veg ?? item.is_veg) ? 'veg' : 'nonveg')
-                        )
-                        if (effectiveTypes.size === 0) effectiveTypes.add(item.is_veg ? 'veg' : 'nonveg')
-                        const showVeg = effectiveTypes.has('veg')
-                        const showNonVeg = effectiveTypes.has('nonveg')
+            const renderItem = (item: Item) => {
+              const itemVariants = variantsByItem.get(item.id) || []
+              const displayedVariants = itemVariants.filter((variant) => !vegOnly || (variant.is_veg ?? item.is_veg) === true)
+              const hasVariants = itemVariants.length > 0
 
-                        const vegIcon = (
-                          <span
-                            className="inline-flex h-4 w-4 items-center justify-center border border-emerald-600"
-                            aria-label="Vegetarian"
-                            title="Vegetarian"
-                          >
-                            <span className="h-2 w-2 rounded-full bg-emerald-600" />
-                          </span>
-                        )
-                        const nonVegIcon = (
-                          <span
-                            className="inline-flex h-4 w-4 items-center justify-center border border-red-600"
-                            aria-label="Non-vegetarian"
-                            title="Non-vegetarian"
-                          >
+              return (
+                <article key={item.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow-md">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        {showDietaryIcons ? (() => {
+                          const effectiveTypes = new Set(itemVariants.map((variant) => (variant.is_veg ?? item.is_veg) ? 'veg' : 'nonveg'))
+                          if (effectiveTypes.size === 0) effectiveTypes.add(item.is_veg ? 'veg' : 'nonveg')
+                          const showVeg = effectiveTypes.has('veg')
+                          const showNonVeg = effectiveTypes.has('nonveg')
+                          if (showVeg && showNonVeg) return null
+                          return (
                             <span
-                              className="h-0 w-0 border-l-[5px] border-r-[5px] border-b-[9px] border-l-transparent border-r-transparent border-b-red-600"
-                              style={{ transform: 'translateY(-1px)' }}
-                            />
-                          </span>
-                        )
+                              className={clsx(
+                                'inline-flex h-4 w-4 items-center justify-center border',
+                                showVeg ? 'border-emerald-600' : 'border-red-600'
+                              )}
+                              aria-label={showVeg ? 'Vegetarian' : 'Non-vegetarian'}
+                              title={showVeg ? 'Vegetarian' : 'Non-vegetarian'}
+                            >
+                              {showVeg ? (
+                                <span className="h-2 w-2 rounded-full bg-emerald-600" />
+                              ) : (
+                                <span className="h-0 w-0 border-l-[5px] border-r-[5px] border-b-[9px] border-l-transparent border-r-transparent border-b-red-600" style={{ transform: 'translateY(-1px)' }} />
+                              )}
+                            </span>
+                          )
+                        })() : null}
+                        <h3 className="truncate font-semibold text-slate-900">{item.name}</h3>
+                        {!item.is_available ? <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">Sold out</span> : null}
+                      </div>
 
-                        if (showVeg && showNonVeg) return null
+                      {item.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{item.description}</p> : null}
 
-                        return <span className="inline-flex items-center gap-1">{showVeg ? vegIcon : nonVegIcon}</span>
-                      })()}
-                      <h3 className="font-medium">{item.name}</h3>
-                      {!item.is_available && (
-                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold text-red-700">Sold out</span>
-                      )}
-                    </div>
-                    {item.description && <p className="mt-1 text-sm text-slate-600">{item.description}</p>}
-                    {(variantsByItem.get(item.id) || []).length > 0 ? (
-                      <div className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 p-2">
-                        <div className="space-y-1.5">
-                          {(variantsByItem.get(item.id) || [])
-                            .filter((variant) => !vegOnly || (variant.is_veg ?? item.is_veg) === true)
-                            .map((variant) => {
+                      {hasVariants ? (
+                        <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                          <div className="mb-2 flex items-center justify-between">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Choose Option</p>
+                            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">{displayedVariants.length} options</span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {displayedVariants.map((variant) => {
                               const effectiveVeg = variant.is_veg ?? item.is_veg
                               return (
-                                <div key={variant.id} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-sm">
+                                <div key={variant.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm">
                                   <span className="inline-flex items-center gap-2 font-medium text-slate-700">
-                                    <span
-                                      className={clsx(
-                                        'inline-flex h-3.5 w-3.5 items-center justify-center border',
-                                        effectiveVeg ? 'border-emerald-600' : 'border-red-600'
-                                      )}
-                                      aria-label={effectiveVeg ? 'Vegetarian' : 'Non-vegetarian'}
-                                      title={effectiveVeg ? 'Vegetarian' : 'Non-vegetarian'}
-                                    >
-                                      {effectiveVeg ? (
-                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
-                                      ) : (
-                                        <span
-                                          className="h-0 w-0 border-l-[4px] border-r-[4px] border-b-[7px] border-l-transparent border-r-transparent border-b-red-600"
-                                          style={{ transform: 'translateY(-1px)' }}
-                                        />
-                                      )}
-                                    </span>
+                                    {showDietaryIcons ? (
+                                      <span className={clsx('inline-flex h-3.5 w-3.5 items-center justify-center border', effectiveVeg ? 'border-emerald-600' : 'border-red-600')}>
+                                        {effectiveVeg ? (
+                                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                                        ) : (
+                                          <span className="h-0 w-0 border-l-[4px] border-r-[4px] border-b-[7px] border-l-transparent border-r-transparent border-b-red-600" style={{ transform: 'translateY(-1px)' }} />
+                                        )}
+                                      </span>
+                                    ) : null}
                                     {variant.name}
                                   </span>
                                   <div className="flex items-center gap-2">
                                     <span className="text-base font-semibold text-slate-900">{variant.price_npr}</span>
-                                    {enableCart && item.is_available ? (
-                                      (() => {
-                                        const key = `${cartSource}:${item.id}::${variant.id}`
-                                        const qty = cartQtyByKey.get(key) || 0
-                                        if (qty === 0) {
-                                          return (
-                                            <button
-                                              type="button"
-                                              onClick={() => addToCart(item, variant)}
-                                              aria-label={`Add ${item.name} ${variant.name}`}
-                                              className="rounded border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700"
-                                            >
-                                              <span aria-hidden="true" className="inline-flex items-center gap-1 leading-none">
-                                                <span className="text-sm">+</span>
-                                                <span>Add</span>
-                                              </span>
-                                            </button>
-                                          )
-                                        }
+                                    {enableCart && item.is_available ? (() => {
+                                      const key = `${cartSource}:${item.id}::${variant.id}`
+                                      const qty = cartQtyByKey.get(key) || 0
+                                      if (qty === 0) {
                                         return (
-                                          <div className="inline-flex items-center gap-3 rounded border border-slate-300 px-3 py-1 text-sm">
-                                            <button
-                                              type="button"
-                                              onClick={() => decrementCartLine(key)}
-                                              className="font-semibold text-slate-700"
-                                              aria-label={`Decrease ${item.name} ${variant.name}`}
-                                            >
-                                              -
-                                            </button>
-                                            <span className="min-w-5 text-center font-semibold text-slate-800">{qty}</span>
-                                            <button
-                                              type="button"
-                                              onClick={() => incrementCartLine(key)}
-                                              className="font-semibold text-slate-700"
-                                              aria-label={`Increase ${item.name} ${variant.name}`}
-                                            >
-                                              +
-                                            </button>
-                                          </div>
+                                          <button type="button" onClick={() => addToCart(item, variant)} aria-label={`Add ${item.name} ${variant.name}`} className="rounded border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                            <span aria-hidden="true" className="inline-flex items-center gap-1 leading-none"><span className="text-sm">+</span><span>Add</span></span>
+                                          </button>
                                         )
-                                      })()
-                                    ) : null}
+                                      }
+                                      return (
+                                        <div className="inline-flex items-center gap-3 rounded border border-slate-300 px-3 py-1 text-sm">
+                                          <button type="button" onClick={() => decrementCartLine(key)} className="font-semibold text-slate-700" aria-label={`Decrease ${item.name} ${variant.name}`}>-</button>
+                                          <span className="min-w-5 text-center font-semibold text-slate-800">{qty}</span>
+                                          <button type="button" onClick={() => incrementCartLine(key)} className="font-semibold text-slate-700" aria-label={`Increase ${item.name} ${variant.name}`}>+</button>
+                                        </div>
+                                      )
+                                    })() : null}
                                   </div>
                                 </div>
                               )
                             })}
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="mt-2 flex items-center gap-2">
-                        <p className="text-base font-semibold">{item.price_npr}</p>
-                        {enableCart && item.is_available ? (
-                          (() => {
+                      ) : (
+                        <div className="mt-2 flex items-center gap-2">
+                          <p className="text-base font-semibold">{item.price_npr}</p>
+                          {enableCart && item.is_available ? (() => {
                             const key = `${cartSource}:${item.id}::base`
                             const qty = cartQtyByKey.get(key) || 0
                             if (qty === 0) {
                               return (
-                                <button
-                                  type="button"
-                                  onClick={() => addToCart(item, null)}
-                                  aria-label={`Add ${item.name}`}
-                                  className="rounded border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700"
-                                >
-                                  <span aria-hidden="true" className="inline-flex items-center gap-1 leading-none">
-                                    <span className="text-sm">+</span>
-                                    <span>Add</span>
-                                  </span>
+                                <button type="button" onClick={() => addToCart(item, null)} aria-label={`Add ${item.name}`} className="rounded border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                  <span aria-hidden="true" className="inline-flex items-center gap-1 leading-none"><span className="text-sm">+</span><span>Add</span></span>
                                 </button>
                               )
                             }
                             return (
                               <div className="inline-flex items-center gap-3 rounded border border-slate-300 px-3 py-1 text-sm">
-                                <button
-                                  type="button"
-                                  onClick={() => decrementCartLine(key)}
-                                  className="font-semibold text-slate-700"
-                                  aria-label={`Decrease ${item.name}`}
-                                >
-                                  -
-                                </button>
+                                <button type="button" onClick={() => decrementCartLine(key)} className="font-semibold text-slate-700" aria-label={`Decrease ${item.name}`}>-</button>
                                 <span className="min-w-5 text-center font-semibold text-slate-800">{qty}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => incrementCartLine(key)}
-                                  className="font-semibold text-slate-700"
-                                  aria-label={`Increase ${item.name}`}
-                                >
-                                  +
-                                </button>
+                                <button type="button" onClick={() => incrementCartLine(key)} className="font-semibold text-slate-700" aria-label={`Increase ${item.name}`}>+</button>
                               </div>
                             )
-                          })()
-                        ) : null}
+                          })() : null}
+                        </div>
+                      )}
+                    </div>
+
+                    {item.image_url ? (
+                      <div className={clsx('relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100', !item.is_available && 'opacity-50')}>
+                        <img src={item.image_url} alt={item.name} className="h-full w-full object-cover" />
                       </div>
-                    )}
+                    ) : null}
                   </div>
-                  {item.image_url && (
-                    <img
-                      src={item.image_url}
-                      alt={item.name}
-                      className={clsx('h-20 w-20 rounded-lg border border-slate-200 object-cover', !item.is_available && 'opacity-50')}
-                    />
-                  )}
-                </div>
-              </article>
-            )
+                </article>
+              )
+            }
 
             return (
-              <section key={category.id} id={categoryAnchors.get(category.id)} className="scroll-mt-20">
+              <section key={category.id} id={categoryAnchors.get(category.id)} className="scroll-mt-28">
                 <h2 className="mb-2 text-lg font-semibold text-slate-900">{category.name}</h2>
                 {category.description && <p className="mb-2 text-sm text-slate-600">{category.description}</p>}
                 <div className="mb-3 h-px w-full bg-slate-200" />
@@ -973,7 +904,7 @@ export default function MenuView({
                   const childItems = itemsByCategory.get(child.id) || []
                   if (childItems.length === 0) return null
                   return (
-                    <div key={child.id} id={categoryAnchors.get(child.id)} className={clsx(catItems.length > 0 ? 'mt-5' : '')}>
+                    <div key={child.id} id={categoryAnchors.get(child.id)} className={clsx('scroll-mt-28', catItems.length > 0 ? 'mt-5' : '')}>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="mb-3 border-l-2 border-slate-300 pl-3">
                           <h3 className="text-base font-semibold text-slate-800">{child.name}</h3>
@@ -1072,10 +1003,6 @@ export default function MenuView({
                     type="button"
                     onClick={() => {
                       setCheckoutStatus(null)
-                      setShowOtpForm(false)
-                      setOtpSent(false)
-                      setOtpCode('')
-                      setOtpPhone('')
                       setCheckoutOpen(true)
                     }}
                     className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
@@ -1117,7 +1044,7 @@ export default function MenuView({
                   type="button"
                   disabled={placingOrder}
                   onClick={async () => {
-                    const result = await placeOrder('WHATSAPP')
+                    const result = await placeOrder()
                     if (!result) return
                     window.open(orderWhatsappHref, '_blank', 'noopener,noreferrer')
                     setCheckoutOpen(false)
@@ -1135,89 +1062,6 @@ export default function MenuView({
                   Open via WhatsApp
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  setCheckoutStatus(null)
-                  setShowOtpForm(true)
-                }}
-                className="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-              >
-                OTP Verification
-              </button>
-
-              {showOtpForm ? (
-                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-medium text-slate-700">Nepali number only</p>
-                  <div className="flex items-center rounded border border-slate-300 bg-white">
-                    <span className="border-r border-slate-200 px-2 py-2 text-sm text-slate-600">+977</span>
-                    <input
-                      value={otpPhone}
-                      onChange={(e) => setOtpPhone(e.target.value)}
-                      inputMode="numeric"
-                      maxLength={10}
-                      placeholder="98XXXXXXXX"
-                      className="w-full px-2 py-2 text-sm outline-none"
-                    />
-                  </div>
-                  {!otpSent ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!isValidNepaliMobile(otpPhone)) {
-                          setCheckoutStatus('Enter a valid Nepali mobile number.')
-                          return
-                        }
-                        setOtpSent(true)
-                        setCheckoutStatus('OTP sent (UI only).')
-                      }}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-                    >
-                      Send OTP
-                    </button>
-                  ) : (
-                    <div className="space-y-2">
-                      <input
-                        value={otpCode}
-                        onChange={(e) => setOtpCode(e.target.value)}
-                        inputMode="numeric"
-                        maxLength={6}
-                        placeholder="Enter 6-digit OTP"
-                        className="w-full rounded border border-slate-300 px-2 py-2 text-sm outline-none"
-                      />
-                      <button
-                        type="button"
-                        disabled={placingOrder}
-                        onClick={() => {
-                          if (!/^\d{6}$/.test(otpCode)) {
-                            setCheckoutStatus('Enter a valid 6-digit OTP.')
-                            return
-                          }
-                          setCheckoutStatus('OTP verified.')
-                        }}
-                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Verify OTP
-                      </button>
-                      <button
-                        type="button"
-                        disabled={placingOrder}
-                        onClick={async () => {
-                          if (!/^\d{6}$/.test(otpCode)) {
-                            setCheckoutStatus('Verify OTP first.')
-                            return
-                          }
-                          await placeOrder('OTP')
-                        }}
-                        className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {placingOrder ? 'Placing...' : 'Place via OTP'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : null}
-
               {checkoutStatus ? <p className="text-xs text-slate-600">{checkoutStatus}</p> : null}
               <button
                 type="button"

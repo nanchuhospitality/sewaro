@@ -124,6 +124,7 @@ export default async function PublicMartMenuPage({ params }: { params: { slug: s
       cartSource="MART"
       sharedPartnerCart
       showVegFilter={false}
+      showDietaryIcons={false}
       backHrefOverride={`/${slug}/partner-menu`}
     />
   )

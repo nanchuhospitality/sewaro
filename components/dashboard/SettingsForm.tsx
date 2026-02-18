@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { FormEvent, useState } from 'react'
 import { updateBusinessSettings } from '@/actions/business'
 import StorageUploader from './StorageUploader'
 
@@ -26,22 +26,31 @@ export default function SettingsForm({ business, businessId }: { business: Busin
   const [status, setStatus] = useState<{ type: 'error' | 'success'; message: string } | null>(null)
   const [pending, setPending] = useState(false)
 
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setPending(true)
+    setStatus(null)
+    try {
+      const formData = new FormData(e.currentTarget)
+      if (businessId) formData.set('business_id', businessId)
+      formData.set('logo_url', logoUrl)
+      formData.set('cover_image_url', coverImageUrl)
+      const res = await updateBusinessSettings(formData)
+      if (res.error) {
+        setStatus({ type: 'error', message: res.error })
+        return
+      }
+      setStatus({ type: 'success', message: 'Saved successfully.' })
+    } catch {
+      setStatus({ type: 'error', message: 'Could not save settings. Please try again.' })
+    } finally {
+      setPending(false)
+    }
+  }
+
   return (
     <form
-      action={async (formData) => {
-        setPending(true)
-        setStatus(null)
-        if (businessId) formData.set('business_id', businessId)
-        formData.set('logo_url', logoUrl)
-        formData.set('cover_image_url', coverImageUrl)
-        const res = await updateBusinessSettings(formData)
-        setPending(false)
-        if (res.error) {
-          setStatus({ type: 'error', message: res.error })
-          return
-        }
-        setStatus({ type: 'success', message: 'Saved successfully.' })
-      }}
+      onSubmit={onSubmit}
       className="space-y-4"
     >
       <div>

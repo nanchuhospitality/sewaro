@@ -73,6 +73,158 @@ async function recalcSupportTicketTotals(supabase: Awaited<ReturnType<typeof req
     .eq('id', ticketId)
 }
 
+function normalizeNepaliPhone(value: string) {
+  const cleaned = value.replace(/[^\d+]/g, '')
+  if (cleaned.startsWith('+977')) return cleaned.slice(4)
+  if (cleaned.startsWith('977')) return cleaned.slice(3)
+  return cleaned
+}
+
+export async function createManualNovaOrder(formData: FormData) {
+  const { supabase } = await requireRole('CENTRAL_OPS')
+
+  const businessId = String(formData.get('business_id') || '').trim() || null
+  const customHotelName = String(formData.get('custom_hotel_name') || '').trim()
+  const rawRoom = String(formData.get('room') || '').trim().toLowerCase()
+  const room = rawRoom && ROOM_REGEX.test(rawRoom) ? rawRoom : null
+  const phoneRaw = String(formData.get('customer_phone') || '').trim()
+  const customerPhone = normalizeNepaliPhone(phoneRaw)
+  const providedMapLink = String(formData.get('hotel_google_map_link') || '').trim()
+  const rawManualDelivery = String(formData.get('delivery_charge_npr') || '').trim()
+  const note = String(formData.get('note') || '').trim() || null
+
+  const rawItemsJson = String(formData.get('items_json') || '').trim()
+  const parsedItems = rawItemsJson
+    ? (() => {
+        try {
+          const parsed = JSON.parse(rawItemsJson)
+          return Array.isArray(parsed) ? parsed : []
+        } catch {
+          return []
+        }
+      })()
+    : []
+
+  const normalizedItems = parsedItems
+    .map((item: any) => ({
+      source: item?.source === 'MART' ? 'MART' : 'DELIVERS',
+      item_name: String(item?.item_name || '').trim(),
+      variant_name: String(item?.variant_name || '').trim() || null,
+      quantity: Number(item?.quantity),
+      unit_price_npr: Number(item?.unit_price_npr),
+    }))
+    .filter(
+      (item: any) =>
+        item.item_name &&
+        Number.isInteger(item.quantity) &&
+        item.quantity > 0 &&
+        Number.isInteger(item.unit_price_npr) &&
+        item.unit_price_npr >= 0
+    )
+
+  if (!room || !ROOM_REGEX.test(room)) return { error: 'Valid room number is required.' }
+  if (!customerPhone || !/^9\d{9}$/.test(customerPhone)) return { error: 'Valid Nepali mobile number is required.' }
+  if (normalizedItems.length === 0) return { error: 'At least one valid item is required.' }
+
+  let businessNameSnapshot = ''
+  let deliveryChargeNpr = 0
+  let resolvedMapLink = providedMapLink
+
+  if (businessId) {
+    let businessRes = await supabase
+      .from('businesses')
+      .select('id,name,is_active,nova_delivers_delivery_charge_npr,nova_mart_delivery_charge_npr,google_business_map_link,google_map_link')
+      .eq('id', businessId)
+      .maybeSingle()
+    const businessSchemaError = businessRes.error?.message?.toLowerCase() || ''
+    if (businessRes.error && businessSchemaError.includes('nova_mart_delivery_charge_npr')) {
+      businessRes = await supabase
+        .from('businesses')
+        .select('id,name,is_active,nova_delivers_delivery_charge_npr,google_business_map_link,google_map_link')
+        .eq('id', businessId)
+        .maybeSingle()
+    }
+    const business = businessRes.data as any
+    if (businessRes.error || !business || !business.is_active) return { error: 'Selected hotel is not available.' }
+    businessNameSnapshot = business.name
+    const hasDeliversItems = normalizedItems.some((item) => item.source === 'DELIVERS')
+    const hasMartItems = normalizedItems.some((item) => item.source === 'MART')
+    const deliveryCandidates: number[] = []
+    if (hasDeliversItems) deliveryCandidates.push(Number(business.nova_delivers_delivery_charge_npr || 0))
+    if (hasMartItems) deliveryCandidates.push(Number((business as any).nova_mart_delivery_charge_npr || 0))
+    deliveryChargeNpr = Math.max(0, deliveryCandidates.length > 0 ? Math.max(...deliveryCandidates) : 0)
+    if (!resolvedMapLink) {
+      resolvedMapLink = String(business.google_business_map_link || business.google_map_link || '').trim()
+    }
+  } else {
+    if (!customHotelName) return { error: 'Hotel name is required when hotel is not selected from database.' }
+    businessNameSnapshot = customHotelName
+    deliveryChargeNpr = 0
+  }
+
+  if (!resolvedMapLink) return { error: 'Google Maps link is required.' }
+
+  if (rawManualDelivery) {
+    const manualDelivery = Number(rawManualDelivery)
+    if (!Number.isInteger(manualDelivery) || manualDelivery < 0) {
+      return { error: 'Delivery charge must be a non-negative whole number.' }
+    }
+    deliveryChargeNpr = manualDelivery
+  }
+
+  const subtotalNpr = normalizedItems.reduce((sum, item) => sum + item.quantity * item.unit_price_npr, 0)
+  const totalNpr = subtotalNpr + deliveryChargeNpr
+
+  const { data: order, error: orderError } = await supabase
+    .from('nova_orders')
+    .insert({
+      business_id: businessId,
+      business_name_snapshot: businessNameSnapshot,
+      hotel_google_map_link: resolvedMapLink,
+      room,
+      source: 'DIRECT',
+      status: 'NEW',
+      customer_phone: customerPhone,
+      note,
+      subtotal_npr: subtotalNpr,
+      delivery_charge_npr: deliveryChargeNpr,
+      total_npr: totalNpr,
+      updated_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (orderError || !order) {
+    const schemaError = orderError?.message?.toLowerCase() || ''
+    if (
+      schemaError.includes('hotel_google_map_link') ||
+      schemaError.includes('nova_orders_source_check') ||
+      schemaError.includes('business_id') && schemaError.includes('null')
+    ) {
+      return { error: 'Manual order schema is not up to date. Run migration 0029_add_manual_order_fields.sql.' }
+    }
+    return { error: friendlyError(orderError?.message || 'Could not create manual order.') }
+  }
+
+  const { error: itemsError } = await supabase.from('nova_order_items').insert(
+    normalizedItems.map((item) => ({
+      order_id: order.id,
+      item_name: item.item_name,
+      variant_name: item.variant_name,
+      quantity: item.quantity,
+      unit_price_npr: item.unit_price_npr,
+      line_total_npr: item.quantity * item.unit_price_npr,
+    }))
+  )
+  if (itemsError) {
+    await supabase.from('nova_orders').delete().eq('id', order.id)
+    return { error: friendlyError(itemsError.message) }
+  }
+
+  revalidatePath('/ops/orders')
+  return { success: true }
+}
+
 export async function updateNovaOrderStatus(formData: FormData) {
   const { supabase } = await requireRole('CENTRAL_OPS')
 

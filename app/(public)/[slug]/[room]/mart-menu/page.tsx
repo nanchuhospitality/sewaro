@@ -127,6 +127,7 @@ export default async function RoomMartMenuPage({ params }: { params: { slug: str
       cartSource="MART"
       sharedPartnerCart
       showVegFilter={false}
+      showDietaryIcons={false}
       backHrefOverride={`/${slug}/${room}/partner-menu`}
     />
   )

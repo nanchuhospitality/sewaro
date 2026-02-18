@@ -132,7 +132,7 @@ export default async function SuperadminBusinessDetailPage({
             Menu
           </Link>
           <Link href={`/superadmin/businesses/${business.id}?tab=tables`} className={tabLinkClass(tab === 'tables')}>
-            Tables
+            Room and QR
           </Link>
           <Link href={`/superadmin/businesses/${business.id}?tab=settings`} className={tabLinkClass(tab === 'settings')}>
             Settings
@@ -223,7 +223,7 @@ export default async function SuperadminBusinessDetailPage({
 
       {tab === 'tables' && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-3 text-base font-semibold">Business Tables / Rooms</h2>
+          <h2 className="mb-3 text-base font-semibold">Business Room and QR</h2>
           {await (async () => {
             const { data: rooms, error } = await supabase
               .from('business_rooms')
